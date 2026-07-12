@@ -1,4 +1,4 @@
-from video.input_video_cleanse.cleanse_input import cleanse_input_video
+from video.input_video_cleanse import cleanse_input_video
 
 
 def test_cleanse_input_video_calls_strip_then_normalize_in_order(mocker):
