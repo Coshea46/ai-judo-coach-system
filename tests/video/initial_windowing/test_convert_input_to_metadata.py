@@ -1,8 +1,9 @@
-# tests/video/test_convert_input_to_metadata.py
-import pytest
-from video.convert_input_to_metadata import compute_initial_clip_windows
-from exceptions.video import InvalidVideoError
 import ffmpeg
+import pytest
+
+from video.initial_windowing import compute_initial_clip_windows
+from exceptions import InvalidVideoError
+
 
 
 def test_basic_windowing(mocker):

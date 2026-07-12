@@ -1,0 +1,1 @@
+# mini pipeline that takes in the generator object containing the initial window objects and spits out the highlight reel objects
