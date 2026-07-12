@@ -8,7 +8,7 @@ from exceptions import InvalidVideoError
 
 def test_basic_windowing(mocker):
     mocker.patch(
-        "video.convert_input_to_metadata.ffmpeg.probe",
+        "video.initial_windowing.convert_input_to_metadata.ffmpeg.probe",
         return_value={"format": {"duration": "21.0"}},
     )
 
@@ -22,7 +22,7 @@ def test_basic_windowing(mocker):
 
 def test_video_shorter_than_window_raises(mocker):
     mocker.patch(
-        "video.convert_input_to_metadata.ffmpeg.probe",
+        "video.initial_windowing.convert_input_to_metadata.ffmpeg.probe",
         return_value={"format": {"duration": "3.0"}},
     )
 
@@ -32,7 +32,7 @@ def test_video_shorter_than_window_raises(mocker):
 
 def test_remainder_window_overlaps_correctly(mocker):
     mocker.patch(
-        "video.convert_input_to_metadata.ffmpeg.probe",
+        "video.initial_windowing.convert_input_to_metadata.ffmpeg.probe",
         return_value={"format": {"duration": "25.0"}},
     )
 
@@ -44,7 +44,7 @@ def test_remainder_window_overlaps_correctly(mocker):
 
 def test_invalid_video_raises(mocker):
     mocker.patch(
-        "video.convert_input_to_metadata.ffmpeg.probe",
+        "video.initial_windowing.convert_input_to_metadata.ffmpeg.probe",
         side_effect=ffmpeg.Error("probe", "stdout", "stderr"),
     )
 

@@ -14,5 +14,7 @@ def test_cleanse_input_video_calls_strip_then_normalize_in_order(mocker):
     result = cleanse_input_video("input.mp4")
 
     mock_strip.assert_called_once_with(input_video_path="input.mp4")
-    mock_normalize.assert_called_once_with(input_video_path="no_audio.mp4")
+    mock_normalize.assert_called_once_with(
+        input_video_path="no_audio.mp4", target_fps=30
+    )
     assert result == "final.mp4"
