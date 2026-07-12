@@ -1,5 +1,5 @@
-from normalize import normalize_video_fps
-from strip_audio import strip_audio
+from video.input_video_cleanse.normalize import normalize_video_fps
+from video.input_video_cleanse.strip_audio import strip_audio
 from config import TARGET_FPS
 
 
