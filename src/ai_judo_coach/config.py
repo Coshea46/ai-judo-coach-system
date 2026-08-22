@@ -40,3 +40,8 @@ BYTETRACK_CONFIG_PATH: str = str(
     / "trackers"
     / "bytetrack.yaml"
 )
+
+
+# final clip generation configs
+MAX_GENERATED_ATTEMPT_CLIPS: int = 10
+MAX_GENERATED_ATTEMPT_CLIP_DURATION_SEC: float = 14.0

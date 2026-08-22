@@ -6,11 +6,15 @@ from .classifier import(
     ClassifierLoadingError,
     InvalidClassifierInputError
 )
+from .window import(
+    NoSurvivingWindowsError
+)
 
 
 __all__ = [
     'InvalidVideoError',
     'InvalidFrameIndicesError',
     'ClassifierLoadingError',
-    'InvalidClassifierInputError'
+    'InvalidClassifierInputError',
+    'NoSurvivingWindowsError'
 ]

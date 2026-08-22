@@ -16,7 +16,8 @@ def cleanse_input_video(input_video_path: str) -> str:
     no_audio_video_path = strip_audio(input_video_path=input_video_path)
 
     normalized_no_audio_video_path = normalize_video_fps(
-        input_video_path=no_audio_video_path, target_fps=TARGET_FPS
+        input_video_path=no_audio_video_path, 
+        target_fps=TARGET_FPS
     )
 
     return normalized_no_audio_video_path

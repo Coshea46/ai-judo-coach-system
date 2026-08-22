@@ -21,7 +21,9 @@ from src.ai_judo_coach.video import(
 )
 from src.ai_judo_coach.schemas.internal import(
     InitialClipWindow,
-    ClipProcessingResult
+    ClipProcessingResult,
+    DetectedAttemptWindow,
+    GeneratedAttemptClip
 )
 from src.ai_judo_coach.inference import(
     process_clip,
@@ -33,11 +35,10 @@ from src.ai_judo_coach.inference import(
 
 def run_pipeline(
     input_video_path: str,
-    
-):
+    temporary_directory: str
+) -> list[GeneratedAttemptClip]:
     """
-    WILL NEED TO UPDATE RETURN TYPE
-    OF FUNCTION ONCE FULL PIPELINE BUILT
+
     """
 
 
@@ -67,8 +68,8 @@ def run_pipeline(
         classifier_device=CLASSIFIER_DEVICE
     )
 
-    # should store the surviving InitialClipWindow objects (those that have a throw in them)
-    initial_throw_attempt_intervals: list[InitialClipWindow] = []
+    # should store the surviving InitialClipWindow objects and their probabilities (those that have a throw in them)
+    initial_throw_attempt_intervals: list[DetectedAttemptWindow] = []
 
     for clip_interval in clip_windows_metadata_generator:
 
@@ -91,7 +92,13 @@ def run_pipeline(
 
 
         if clip_result.contains_throw_attempt:
-            initial_throw_attempt_intervals.append(clip_interval)
+            initial_throw_attempt_intervals.append(
+                DetectedAttemptWindow(
+                    window=clip_interval,
+                    attempt_probability=clip_result.attempt_probability
+                )
+            )
+
 
 
     
