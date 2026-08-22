@@ -8,6 +8,9 @@ from .player_pose_sequences import(
     PlayerPoseSequence,
     TwoPlayerPoseSequences
 )
+from .clip_classification_result import(
+    ClipClassificationResult
+)
 
 
 __all__ = [
@@ -16,6 +19,7 @@ __all__ = [
     'FrameDetections',
     'ClipDetections',
     'PlayerPoseSequence',
-    'TwoPlayerPoseSequences'
+    'TwoPlayerPoseSequences',
+    'ClipClassificationResult'
 ]
 

@@ -23,6 +23,7 @@ def track_video(
         stream=True,
         tracker=tracker_path,
         device=compute_device,
+        persist=False
     )
 
     return results_stream

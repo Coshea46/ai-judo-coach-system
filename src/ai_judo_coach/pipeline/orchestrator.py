@@ -1,19 +1,34 @@
 from collections.abc import Iterator
 
-import numpy as np   # need for type hints only
+import numpy as np
 
 from src.ai_judo_coach.config import(
     CLIP_STRIDE_SEC, 
     CLIP_DURATION_SEC,
     TARGET_FPS,
-    DECORD_TARGET_DEVICE
+    DECORD_TARGET_DEVICE,
+    YOLO_MODEL_WEIGHTS,
+    YOLO_DEVICE,
+    BYTETRACK_CONFIG_PATH,
+    CLASSIFIER_DEVICE,
+    JUDO_CLIPPER_MODEL_DIRECTORY
+    
 )
 from src.ai_judo_coach.video import(
     compute_initial_clip_windows,
     cleanse_input_video,
     extract_frames_from_initial_window
 )
-from src.ai_judo_coach.schemas.internal import InitialClipWindow
+from src.ai_judo_coach.schemas.internal import(
+    InitialClipWindow,
+    ClipProcessingResult
+)
+from src.ai_judo_coach.inference import(
+    process_clip,
+    resolve_yolo_device,
+    load_yolo_model,
+    construct_classifier
+)
 
 
 def run_pipeline(
@@ -36,6 +51,20 @@ def run_pipeline(
         input_video_path=cleansed_video_path,
         individual_window_duration=float(CLIP_DURATION_SEC),
         stride=float(CLIP_STRIDE_SEC)
+    )  
+
+    # instantiate models for inference
+    yolo_device = resolve_yolo_device(
+        requested_device=YOLO_DEVICE
+    )
+    yolo_model = load_yolo_model(
+        yolo_model_path=YOLO_MODEL_WEIGHTS
+    )
+
+    # package already handles device
+    judo_classifier_model = construct_classifier(
+        classifier_release_directory=JUDO_CLIPPER_MODEL_DIRECTORY,
+        classifier_device=CLASSIFIER_DEVICE
     )
 
     # should store the surviving InitialClipWindow objects (those that have a throw in them)
@@ -51,10 +80,20 @@ def run_pipeline(
             device=DECORD_TARGET_DEVICE
         )
 
-        # TODO: port over yolo and viterbi logic for single clip
+        clip_result: ClipProcessingResult = process_clip(
+            clip_as_numpy=clip_interval_as_numpy,
+            clip_id=str(clip_interval.window_id),
+            yolo_model=yolo_model,
+            yolo_tracker_path=BYTETRACK_CONFIG_PATH,
+            yolo_device=yolo_device,
+            judo_clip_classifier=judo_classifier_model
+        )
 
 
+        if clip_result.contains_throw_attempt:
+            initial_throw_attempt_intervals.append(clip_interval)
 
 
+    
     
     
