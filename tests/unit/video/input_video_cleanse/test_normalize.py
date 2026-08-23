@@ -1,8 +1,8 @@
 import ffmpeg
 import pytest
 
-from video.input_video_cleanse.normalize import normalize_video_fps
-from exceptions.video import InvalidVideoError
+from ai_judo_coach.video.input_video_cleanse.normalize import normalize_video_fps
+from ai_judo_coach.exceptions.video import InvalidVideoError
 
 
 def test_normalize_video_fps_returns_temp_path(mocker):

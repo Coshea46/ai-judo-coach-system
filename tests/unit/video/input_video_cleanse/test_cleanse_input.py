@@ -1,4 +1,4 @@
-from video.input_video_cleanse import cleanse_input_video
+from ai_judo_coach.video.input_video_cleanse import cleanse_input_video
 
 
 def test_cleanse_input_video_calls_strip_then_normalize_in_order(mocker):

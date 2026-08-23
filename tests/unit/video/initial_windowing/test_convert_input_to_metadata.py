@@ -1,8 +1,8 @@
 import ffmpeg
 import pytest
 
-from video.initial_windowing import compute_initial_clip_windows
-from exceptions import InvalidVideoError
+from ai_judo_coach.video.initial_windowing import compute_initial_clip_windows
+from ai_judo_coach.exceptions import InvalidVideoError
 
 
 

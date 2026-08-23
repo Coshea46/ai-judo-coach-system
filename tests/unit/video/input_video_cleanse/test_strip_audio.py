@@ -1,8 +1,8 @@
 import ffmpeg
 import pytest
 
-from video.input_video_cleanse.strip_audio import strip_audio
-from exceptions.video import InvalidVideoError
+from ai_judo_coach.video.input_video_cleanse.strip_audio import strip_audio
+from ai_judo_coach.exceptions.video import InvalidVideoError
 
 
 def test_strip_audio_returns_temp_path(mocker):
