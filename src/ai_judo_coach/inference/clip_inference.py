@@ -7,7 +7,7 @@ from v1_clip_classification_model.inference import (
     JudoClipClassifier,
 )
 
-from ai_judo_coach.schemas import (
+from ai_judo_coach.schemas.internal import (
     ClipProcessingResult,
 )
 
@@ -62,7 +62,16 @@ def process_clip(
 
     classifier_input_array = build_lstm_input_array(
         clip_player_pose_sequences=player_pose_sequences,
+        pose_sequence_quality_report=quality_report,
     )
+
+    if classifier_input_array is None:
+        return ClipProcessingResult(
+            clip_id=clip_id,
+            contains_throw_attempt=False,
+            attempt_probability=0.0,
+            predicted_class_name="no_attempt",
+        )
 
     # Now run through the Judo clip-classifier model.
     clip_classification_result = predict(
@@ -74,11 +83,6 @@ def process_clip(
     contains_throw_attempt = (
         clip_classification_result.prediction == 1
     )
-
-    # if quality report rejects clip, assume clip contains no throw attempt
-    if not quality_report.accepted:
-        contains_throw_attempt = False
-        
 
     return ClipProcessingResult(
         clip_id=clip_id,
