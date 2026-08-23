@@ -1,8 +1,9 @@
 from collections.abc import Iterator
+from pathlib import Path
 
 import numpy as np
 
-from src.ai_judo_coach.config import(
+from ai_judo_coach.config import(
     CLIP_STRIDE_SEC, 
     CLIP_DURATION_SEC,
     TARGET_FPS,
@@ -11,40 +12,58 @@ from src.ai_judo_coach.config import(
     YOLO_DEVICE,
     BYTETRACK_CONFIG_PATH,
     CLASSIFIER_DEVICE,
-    JUDO_CLIPPER_MODEL_DIRECTORY
-    
+    JUDO_CLIPPER_MODEL_DIRECTORY,
+    MAX_GENERATED_ATTEMPT_CLIP_DURATION_SEC,
+    MAX_GENERATED_ATTEMPT_CLIPS,
+    OUTPUT_CLIP_NAMING_PATTERN
 )
-from src.ai_judo_coach.video import(
+from ai_judo_coach.video import(
     compute_initial_clip_windows,
     cleanse_input_video,
     extract_frames_from_initial_window
 )
-from src.ai_judo_coach.schemas.internal import(
+from ai_judo_coach.schemas.internal import(
     InitialClipWindow,
     ClipProcessingResult,
     DetectedAttemptWindow,
     GeneratedAttemptClip
 )
-from src.ai_judo_coach.inference import(
+from ai_judo_coach.inference import(
     process_clip,
     resolve_yolo_device,
     load_yolo_model,
     construct_classifier
 )
+from ai_judo_coach.attempt_clip_generation import(
+    select_new_intervals,
+    extract_final_clips
+)
 
 
 def run_pipeline(
     input_video_path: str,
-    temporary_directory: str
+    temporary_output_directory: str
 ) -> list[GeneratedAttemptClip]:
     """
+    Process one input video and generate clips containing predicted
+    throw attempts.
 
+    The input video is cleansed, divided into overlapping initial
+    windows, and processed through pose estimation, player detection,
+    and clip classification. Positively classified windows are then
+    consolidated into final intervals and extracted as .mp4 files in
+    the supplied temporary output directory.
+
+    Returns:
+        A list of generated attempt clips. Returns an empty list when
+        no throw attempts are detected.
     """
 
-
     # cleanse input video first
-    cleansed_video_path: str = cleanse_input_video(
-        input_video_path=input_video_path
+    cleansed_video_path: str
+    cleansed_video_path, cleansed_video_duration = cleanse_input_video(
+        input_video_path=input_video_path,
+        output_directory=temporary_output_directory
     )
 
     # compute initial clip windows on cleansed input video
@@ -100,7 +119,31 @@ def run_pipeline(
             )
 
 
+    # no detected attempts is a valid pipeline result
+    if not initial_throw_attempt_intervals:
+        return []
 
-    
-    
-    
+
+    # now create clips to return to the user
+    revised_intervals = select_new_intervals(
+        surviving_initial_windows=initial_throw_attempt_intervals,
+        source_video_duration=cleansed_video_duration,
+        max_new_interval_duration=MAX_GENERATED_ATTEMPT_CLIP_DURATION_SEC,
+        max_intervals_per_video=MAX_GENERATED_ATTEMPT_CLIPS
+    )
+
+    generated_clips_output_directory = str(
+        Path(temporary_output_directory)
+        / "generated_clips"
+    )
+
+    final_clips = extract_final_clips(
+        selected_intervals=revised_intervals,
+        temporary_output_dir_path=generated_clips_output_directory,
+        clip_naming_pattern=OUTPUT_CLIP_NAMING_PATTERN,
+        source_video_path=cleansed_video_path,
+        desired_fps=TARGET_FPS
+    )
+
+
+    return final_clips

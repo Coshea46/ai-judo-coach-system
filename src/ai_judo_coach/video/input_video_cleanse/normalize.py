@@ -1,35 +1,69 @@
-import tempfile
+from pathlib import Path
 
 import ffmpeg
 
-from src.ai_judo_coach.exceptions import InvalidVideoError
+from ai_judo_coach.exceptions import InvalidVideoError
 
 
 def normalize_video_fps(
-    input_video_path: str, 
-    target_fps: float
+    input_video_path: str,
+    target_fps: float,
+    output_video_path: str,
 ) -> str:
     """
-    Re-encodes the input video to a fixed fps, so downstream pipeline
-    stages can assume consistent frame timing regardless of source video.
+    Re-encode the input video to a fixed FPS so downstream pipeline
+    stages can assume consistent frame timing.
+
+    The normalised video is written to the supplied output path.
     """
 
-    normalized_fps_video_path = tempfile.NamedTemporaryFile(
-        suffix=".mp4", delete=False
-    ).name
+    if target_fps <= 0.0:
+        raise ValueError(
+            "target_fps must be greater than zero"
+        )
+
+    input_path = Path(input_video_path)
+    output_path = Path(output_video_path)
+
+    if not input_path.is_file():
+        raise InvalidVideoError(
+            f"Input video does not exist: {input_path}"
+        )
+
+    output_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
 
     try:
         (
-            ffmpeg.input(input_video_path)
-            .filter("fps", fps=target_fps)
-            .output(normalized_fps_video_path)
+            ffmpeg.input(str(input_path))
+            .filter(
+                "fps",
+                fps=target_fps,
+            )
+            .output(str(output_path))
             .overwrite_output()
             .run(quiet=True)
         )
+    except ffmpeg.Error as error:
+        output_path.unlink(missing_ok=True)
 
-    except ffmpeg.Error as e:
+        error_message = (
+            error.stderr.decode(errors="replace")
+            if error.stderr
+            else str(error)
+        )
+
         raise InvalidVideoError(
-            f"Unable to convert input video to target fps: {e}"
-        ) from e
+            "Unable to convert input video to target FPS: "
+            f"{error_message}"
+        ) from error
 
-    return normalized_fps_video_path
+    if not output_path.is_file():
+        raise InvalidVideoError(
+            "FFmpeg completed without creating the normalised video: "
+            f"{output_path}"
+        )
+
+    return str(output_path)

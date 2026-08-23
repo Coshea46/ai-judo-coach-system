@@ -1,29 +1,61 @@
-import tempfile
+from pathlib import Path
 
 import ffmpeg
 
-from src.ai_judo_coach.exceptions import InvalidVideoError
+from ai_judo_coach.exceptions import InvalidVideoError
 
 
-def strip_audio(input_video_path: str) -> str:
+def strip_audio(
+    input_video_path: str,
+    output_video_path: str,
+) -> str:
     """
-    Removes the audio track from the video.
-    Returns path to audio-free output file stored in system temp folder.
+    Remove the audio track from the input video.
+
+    The audio-free video is written to the supplied output path.
     """
 
-    stripped_audio_video_path = tempfile.NamedTemporaryFile(
-        suffix=".mp4", delete=False
-    ).name
+    input_path = Path(input_video_path)
+    output_path = Path(output_video_path)
+
+    if not input_path.is_file():
+        raise InvalidVideoError(
+            f"Input video does not exist: {input_path}"
+        )
+
+    output_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
 
     try:
         (
-            ffmpeg.input(input_video_path)
-            .output(stripped_audio_video_path, an=None)
+            ffmpeg.input(str(input_path))
+            .output(
+                str(output_path),
+                an=None,
+            )
             .overwrite_output()
             .run(quiet=True)
         )
+    except ffmpeg.Error as error:
+        output_path.unlink(missing_ok=True)
 
-    except ffmpeg.Error as e:
-        raise InvalidVideoError(f"failed to strip input video audio: {e}") from e
+        error_message = (
+            error.stderr.decode(errors="replace")
+            if error.stderr
+            else str(error)
+        )
 
-    return stripped_audio_video_path
+        raise InvalidVideoError(
+            "Unable to remove audio from the input video: "
+            f"{error_message}"
+        ) from error
+
+    if not output_path.is_file():
+        raise InvalidVideoError(
+            "FFmpeg completed without creating the audio-free video: "
+            f"{output_path}"
+        )
+
+    return str(output_path)
