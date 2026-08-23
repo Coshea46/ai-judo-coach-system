@@ -39,3 +39,6 @@ runs/
 build/
 dist/
 *.egg-info/
+
+# Testing fixtures
+*.mp4

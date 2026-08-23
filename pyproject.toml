@@ -22,6 +22,7 @@ dependencies = [
     "torch==2.13.0",
     "ultralytics==8.4.126",
     "v1-clip-classification-model==0.1.0",
+    "lap==0.5.13",
 ]
 
 
@@ -53,4 +54,7 @@ target-version = ["py312"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra"
+addopts = "-ra --import-mode=importlib"
+markers = [
+    "integration: tests using real models, media files, or external executables",
+]
