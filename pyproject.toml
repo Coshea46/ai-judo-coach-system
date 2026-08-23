@@ -1,3 +1,56 @@
+[build-system]
+requires = [
+    "setuptools>=84.0.0",
+    "wheel>=0.48.0",
+]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "ai-judo-coach-system"
+version = "0.1.0"
+description = "Video-processing system for detecting and extracting throw attempts from judo footage."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+
+dependencies = [
+    "decord==0.6.0",
+    "ffmpeg-python==0.2.0",
+    "numpy==2.5.1",
+    "opencv-python==5.0.0.93",
+    "polars==1.43.2",
+    "pydantic==2.13.4",
+    "torch==2.13.0",
+    "ultralytics==8.4.126",
+    "v1-clip-classification-model==0.1.0",
+]
+
+
+[project.optional-dependencies]
+api = [
+    "fastapi>=0.115,<1.0",
+    "python-multipart>=0.0.18,<1.0",
+    "uvicorn[standard]>=0.34,<1.0",
+]
+
+dev = [
+    "black==26.5.1",
+    "build==1.5.0",
+    "pip-tools==7.6.1",
+    "pytest==9.1.1",
+    "pytest-mock==3.15.1",
+]
+
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+
+
 [tool.pytest.ini_options]
-pythonpath = ["."]
 testpaths = ["tests"]
+addopts = "-ra"
