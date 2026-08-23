@@ -12,3 +12,5 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements.txt -r requirements-dev.txt
       - run: pytest
+        env:
+          PYTHONPATH: src
