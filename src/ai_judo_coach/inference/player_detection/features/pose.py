@@ -13,7 +13,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ai_judo_coach.inference.inference_schemas import PersonDetection
-from schemas import keypoints as kp
+from ai_judo_coach.inference.inference_schemas import keypoints as kp
 
 
 FloatArray = NDArray[np.float32]

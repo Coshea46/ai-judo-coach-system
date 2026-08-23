@@ -4,7 +4,7 @@ from collections.abc import Iterator
 import numpy as np
 from ultralytics.engine.results import Results
 
-from schemas import (
+from ai_judo_coach.inference.inference_schemas import (
     PersonDetection,
     FrameDetections,
     ClipDetections,

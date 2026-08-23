@@ -1,4 +1,4 @@
-from inference_schemas import keypoints
+from . import keypoints
 from .detections import(
     PersonDetection, 
     FrameDetections, 
