@@ -3,8 +3,8 @@ import decord
 from decord import VideoReader, cpu, gpu  # using decord since significantly faster and more accurate than OpenCV2
 from decord._ffi.base import DECORDError
 
-from src.ai_judo_coach.exceptions import InvalidFrameIndicesError
-from src.ai_judo_coach.schemas.internal import InitialClipWindow
+from ai_judo_coach.exceptions import InvalidFrameIndicesError
+from ai_judo_coach.schemas.internal import InitialClipWindow
 
 
 # fps should be passed in by caller and caller should be the one to get from config.py

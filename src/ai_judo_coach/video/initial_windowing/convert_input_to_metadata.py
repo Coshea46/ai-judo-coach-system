@@ -2,8 +2,8 @@ from collections.abc import Iterator
 
 import ffmpeg
 
-from src.ai_judo_coach.schemas.internal import InitialClipWindow
-from src.ai_judo_coach.exceptions.video import InvalidVideoError
+from ai_judo_coach.schemas.internal import InitialClipWindow
+from ai_judo_coach.exceptions.video import InvalidVideoError
 
 
 def compute_initial_clip_windows(
