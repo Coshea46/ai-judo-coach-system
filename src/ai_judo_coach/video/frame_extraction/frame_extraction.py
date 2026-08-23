@@ -28,7 +28,7 @@ def extract_frames_from_initial_window(
     )
 
     start_frame = int(window.start_time * video_fps)
-    end_frame = int(window.end_time * video_fps)
+    end_frame = int(window.end_time * video_fps) - 1
 
     frame_indices = list(
         range(
