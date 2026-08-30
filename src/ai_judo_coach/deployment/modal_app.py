@@ -68,7 +68,6 @@ pipeline_image = (
     .pip_install(
         "pydantic>=2.10,<3.0",
     )
-
     .add_local_file(
         local_path=str(
             _CLASSIFIER_WHEEL_PATH
@@ -98,6 +97,31 @@ pipeline_image = (
             _WEIGHTS_DIRECTORY
         ),
         remote_path="/app/weights",
+        copy=True,
+    )
+    .env(
+        {
+            "PYTHONPATH": "/app/src",
+        }
+    )
+)
+
+# Lightweight image used by the FastAPI control plane.
+api_image = (
+    modal.Image
+    .debian_slim(
+        python_version="3.12"
+    )
+    .pip_install(
+        "boto3==1.43.66",
+        "fastapi>=0.115,<1.0",
+        "pydantic>=2.10,<3.0",
+    )
+    .add_local_dir(
+        local_path=str(
+            _SOURCE_DIRECTORY
+        ),
+        remote_path="/app/src",
         copy=True,
     )
     .env(
@@ -229,6 +253,19 @@ def process_video_job(
             "job_id": job_id,
             "clips": uploaded_clips,
         }
+
+
+@app.function(
+    image=api_image,
+    secrets=[aws_secret],
+)
+@modal.asgi_app()
+def fastapi_app():
+    """Serve the FastAPI control plane through Modal."""
+
+    from ai_judo_coach.main import app as api
+
+    return api
 
 
 def _construct_local_input_video_path(
