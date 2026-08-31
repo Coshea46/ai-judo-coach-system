@@ -12,8 +12,10 @@ app = FastAPI()
 origins = [
     "http://localhost:3000",
     "http://localhost:5173",
+    "https://ai-judo-coach-frontend.vercel.app",
+    "https://judoclipper.com",
+    "https://www.judoclipper.com",
 ]
-
 
 app.add_middleware(
     CORSMiddleware,
