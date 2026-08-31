@@ -1,5 +1,5 @@
 import uuid
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import modal
 from fastapi import(
@@ -335,10 +335,26 @@ def read_job_status(
     response_model=SubmitJobResponse,
 )
 def create_example_job(
-    s3_client: Annotated[Any, Depends(get_s3_client)],
-    bucket_name: Annotated[str, Depends(get_bucket_name)],
-    job_store: Annotated[modal.Dict, Depends(get_job_store)],
-    modal_pipeline_worker: Annotated[Any, Depends(get_pipeline_worker)]
+    s3_client: Annotated[
+        Any,
+        Depends(get_s3_client),
+    ],
+    bucket_name: Annotated[
+        str,
+        Depends(get_bucket_name),
+    ],
+    job_store: Annotated[
+        modal.Dict,
+        Depends(get_job_store),
+    ],
+    modal_pipeline_worker: Annotated[
+        Any,
+        Depends(get_pipeline_worker),
+    ],
+    example: Literal[
+        "full",
+        "short",
+    ] = "full",
 ) -> dict[str, str]:
     """
     Create and submit a processing job using the example video.
@@ -350,6 +366,7 @@ def create_example_job(
         s3_client=s3_client,
         bucket_name=bucket_name,
         job_id=job_id,
+        example=example,
     )
 
     job_store.put(
