@@ -544,3 +544,145 @@ def test_process_clip_propagates_yolo_tracking_failure_and_stops_pipeline(
     detect_players_mock.assert_not_called()
     build_input_mock.assert_not_called()
     predict_mock.assert_not_called()
+
+
+
+
+
+def test_process_clip_uses_sparse_cached_detection_path(
+    mocker,
+) -> None:
+    clip_as_numpy = [
+        np.zeros(
+            (32, 32, 3),
+            dtype=np.uint8,
+        ),
+    ]
+
+    yolo_model = mocker.Mock()
+    judo_clip_classifier = mocker.Mock()
+    clip_detections = mocker.Mock()
+    pose_detection_cache = {}
+
+    expected_result = ClipProcessingResult(
+        clip_id="clip_1",
+        contains_throw_attempt=False,
+        attempt_probability=0.2,
+        predicted_class_name="no_attempt",
+    )
+
+    cached_detection_mock = mocker.patch(
+        f"{CLIP_INFERENCE_MODULE_PATH}."
+        "collect_cached_tracked_clip_detections",
+        return_value=clip_detections,
+    )
+    track_video_mock = mocker.patch(
+        f"{CLIP_INFERENCE_MODULE_PATH}."
+        "track_video",
+    )
+    collect_detections_mock = mocker.patch(
+        f"{CLIP_INFERENCE_MODULE_PATH}."
+        "collect_clip_detections",
+    )
+    process_detections_mock = mocker.patch(
+        f"{CLIP_INFERENCE_MODULE_PATH}."
+        "_process_clip_detections",
+        return_value=expected_result,
+    )
+
+    result = process_clip(
+        clip_as_numpy=clip_as_numpy,
+        clip_id="clip_1",
+        yolo_model=yolo_model,
+        yolo_tracker_path="bytetrack.yaml",
+        yolo_device="cuda:0",
+        judo_clip_classifier=judo_clip_classifier,
+        absolute_frame_indices=[
+            90,
+            91,
+        ],
+        pose_detection_frame_indices=[
+            91,
+        ],
+        pose_detection_cache=pose_detection_cache,
+    )
+
+    assert result is expected_result
+
+    cached_detection_mock.assert_called_once_with(
+        yolo_model=yolo_model,
+        tracker_path="bytetrack.yaml",
+        clip_as_numpy=clip_as_numpy,
+        absolute_frame_indices=[
+            90,
+            91,
+        ],
+        pose_detection_frame_indices=[
+            91,
+        ],
+        compute_device="cuda:0",
+        pose_detection_cache=pose_detection_cache,
+        clip_id="clip_1",
+    )
+
+    track_video_mock.assert_not_called()
+    collect_detections_mock.assert_not_called()
+
+    process_detections_mock.assert_called_once_with(
+        clip_detections=clip_detections,
+        clip_id="clip_1",
+        judo_clip_classifier=judo_clip_classifier,
+    )
+
+
+@pytest.mark.parametrize(
+    (
+        "absolute_frame_indices",
+        "pose_detection_frame_indices",
+        "pose_detection_cache",
+    ),
+    [
+        (
+            [0],
+            None,
+            None,
+        ),
+        (
+            [0],
+            [0],
+            None,
+        ),
+        (
+            None,
+            [0],
+            {},
+        ),
+    ],
+)
+def test_process_clip_rejects_incomplete_cache_arguments(
+    mocker,
+    absolute_frame_indices,
+    pose_detection_frame_indices,
+    pose_detection_cache,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match="must either all be supplied or all be omitted",
+    ):
+        process_clip(
+            clip_as_numpy=[],
+            clip_id="clip_0",
+            yolo_model=mocker.Mock(),
+            yolo_tracker_path="bytetrack.yaml",
+            yolo_device="cpu",
+            judo_clip_classifier=mocker.Mock(),
+            absolute_frame_indices=(
+                absolute_frame_indices
+            ),
+            pose_detection_frame_indices=(
+                pose_detection_frame_indices
+            ),
+            pose_detection_cache=(
+                pose_detection_cache
+            ),
+        )

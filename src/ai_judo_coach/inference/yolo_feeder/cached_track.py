@@ -21,6 +21,7 @@ def collect_cached_tracked_clip_detections(
     tracker_path: str,
     clip_as_numpy: list[np.ndarray],
     absolute_frame_indices: list[int],
+    pose_detection_frame_indices: list[int],
     compute_device: str | int,
     pose_detection_cache: dict[int, FrameDetections],
     clip_id: str,
@@ -29,24 +30,41 @@ def collect_cached_tracked_clip_detections(
     Collect pose detections while reusing YOLO inference across
     overlapping clips.
 
-    Untracked pose detections are cached by absolute source-frame
-    index. A fresh ByteTrack instance then processes every frame in
-    the current clip, preserving per-window tracking semantics.
+    Only frames absent from the shared pose-detection cache are
+    supplied as NumPy arrays. A fresh ByteTrack instance then replays
+    all cached detections for the current clip, preserving per-window
+    tracking semantics.
     """
 
-    if len(clip_as_numpy) != len(absolute_frame_indices):
+    if len(clip_as_numpy) != len(
+        pose_detection_frame_indices
+    ):
         raise ValueError(
-            "clip_as_numpy and absolute_frame_indices must have "
-            "the same length"
+            "clip_as_numpy and pose_detection_frame_indices "
+            "must have the same length"
         )
 
     _populate_pose_detection_cache(
         yolo_model=yolo_model,
         clip_as_numpy=clip_as_numpy,
-        absolute_frame_indices=absolute_frame_indices,
+        absolute_frame_indices=(
+            pose_detection_frame_indices
+        ),
         compute_device=compute_device,
         pose_detection_cache=pose_detection_cache,
     )
+
+    missing_frame_indices = [
+        frame_idx
+        for frame_idx in absolute_frame_indices
+        if frame_idx not in pose_detection_cache
+    ]
+
+    if missing_frame_indices:
+        raise RuntimeError(
+            "Pose detection cache is missing required frame "
+            f"indices: {missing_frame_indices}"
+        )
 
     tracker = _create_tracker(
         tracker_path=tracker_path,
@@ -54,15 +72,8 @@ def collect_cached_tracked_clip_detections(
 
     tracked_frame_detections: list[FrameDetections] = []
 
-    for relative_frame_idx, (
-        frame,
-        absolute_frame_idx,
-    ) in enumerate(
-        zip(
-            clip_as_numpy,
-            absolute_frame_indices,
-            strict=True,
-        )
+    for relative_frame_idx, absolute_frame_idx in enumerate(
+        absolute_frame_indices
     ):
         untracked_frame_detections = (
             pose_detection_cache[absolute_frame_idx]
@@ -71,7 +82,6 @@ def collect_cached_tracked_clip_detections(
         tracked_frame_detections.append(
             _track_frame_detections(
                 tracker=tracker,
-                frame=frame,
                 untracked_frame_detections=(
                     untracked_frame_detections
                 ),
@@ -167,15 +177,16 @@ def _create_tracker(
 
 def _track_frame_detections(
     tracker: BYTETracker,
-    frame: np.ndarray,
     untracked_frame_detections: FrameDetections,
     relative_frame_idx: int,
 ) -> FrameDetections:
     """
     Replay one frame's cached detections through ByteTrack.
 
-    This reproduces the relevant behaviour of Ultralytics'
-    on_predict_postprocess_end tracking callback.
+    The configured plain ByteTrack tracker does not require the
+    original frame. This reproduces the relevant behaviour of
+    Ultralytics' on_predict_postprocess_end tracking callback without
+    retaining or decoding overlapping frames again.
     """
 
     tracker_input = _build_tracker_input(
@@ -184,7 +195,7 @@ def _track_frame_detections(
 
     tracks = tracker.update(
         tracker_input,
-        frame,
+        None,
     )
 
     if len(tracks) == 0:

@@ -95,7 +95,7 @@ def test_collect_cached_tracked_clip_detections_rejects_mismatched_lengths(
     with pytest.raises(
         ValueError,
         match=(
-            "clip_as_numpy and absolute_frame_indices "
+            "clip_as_numpy and pose_detection_frame_indices "
             "must have the same length"
         ),
     ):
@@ -109,6 +109,7 @@ def test_collect_cached_tracked_clip_detections_rejects_mismatched_lengths(
                 ),
             ],
             absolute_frame_indices=[],
+            pose_detection_frame_indices=[],
             compute_device="cpu",
             pose_detection_cache={},
             clip_id="clip_0",
@@ -206,6 +207,10 @@ def test_collect_cached_tracked_clip_detections_reuses_overlapping_frames(
                 10,
                 11,
             ],
+            pose_detection_frame_indices=[
+                10,
+                11,
+            ],
             compute_device="cuda:0",
             pose_detection_cache=(
                 pose_detection_cache
@@ -220,11 +225,13 @@ def test_collect_cached_tracked_clip_detections_reuses_overlapping_frames(
             yolo_model=yolo_model,
             tracker_path="bytetrack.yaml",
             clip_as_numpy=[
-                frames[1],
                 frames[2],
             ],
             absolute_frame_indices=[
                 11,
+                12,
+            ],
+            pose_detection_frame_indices=[
                 12,
             ],
             compute_device="cuda:0",
@@ -359,6 +366,7 @@ def test_collect_cached_tracked_clip_detections_clears_cached_track_ids(
             tracker_path="bytetrack.yaml",
             clip_as_numpy=[frame],
             absolute_frame_indices=[45],
+            pose_detection_frame_indices=[45],
             compute_device="cpu",
             pose_detection_cache=(
                 pose_detection_cache
@@ -483,8 +491,9 @@ def test_collect_cached_tracked_clip_detections_uses_tracker_source_indices(
         .collect_cached_tracked_clip_detections(
             yolo_model=yolo_model,
             tracker_path="bytetrack.yaml",
-            clip_as_numpy=[frame],
+            clip_as_numpy=[],
             absolute_frame_indices=[55],
+            pose_detection_frame_indices=[],
             compute_device="cpu",
             pose_detection_cache={
                 55: cached_frame,
@@ -500,7 +509,7 @@ def test_collect_cached_tracked_clip_detections_uses_tracker_source_indices(
         tracker.update.call_args.args
     )
 
-    assert supplied_frame is frame
+    assert supplied_frame is None
 
     np.testing.assert_allclose(
         tracker_input.data,
@@ -652,8 +661,9 @@ def test_empty_tracker_output_copies_untracked_detections(
         .collect_cached_tracked_clip_detections(
             yolo_model=mocker.Mock(),
             tracker_path="bytetrack.yaml",
-            clip_as_numpy=[frame],
+            clip_as_numpy=[],
             absolute_frame_indices=[75],
+            pose_detection_frame_indices=[],
             compute_device="cpu",
             pose_detection_cache={
                 75: cached_frame,
@@ -718,9 +728,52 @@ def test_cache_population_requires_one_result_per_frame(
                 ),
             ],
             absolute_frame_indices=[0],
+            pose_detection_frame_indices=[0],
             compute_device="cpu",
             pose_detection_cache={},
             clip_id="clip_0",
         )
 
+    create_tracker_mock.assert_not_called()
+
+
+
+
+def test_collect_cached_tracked_clip_detections_rejects_missing_cache_frames(
+    mocker,
+) -> None:
+    yolo_model = mocker.Mock()
+
+    create_tracker_mock = mocker.patch.object(
+        cached_track,
+        "_create_tracker",
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "Pose detection cache is missing required frame "
+            "indices: \\[11\\]"
+        ),
+    ):
+        cached_track.collect_cached_tracked_clip_detections(
+            yolo_model=yolo_model,
+            tracker_path="bytetrack.yaml",
+            clip_as_numpy=[],
+            absolute_frame_indices=[
+                10,
+                11,
+            ],
+            pose_detection_frame_indices=[],
+            compute_device="cpu",
+            pose_detection_cache={
+                10: _create_frame_detections(
+                    frame_idx=10,
+                    person_detections=[],
+                ),
+            },
+            clip_id="clip_0",
+        )
+
+    yolo_model.predict.assert_not_called()
     create_tracker_mock.assert_not_called()

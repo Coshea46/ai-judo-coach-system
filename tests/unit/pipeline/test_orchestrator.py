@@ -126,6 +126,15 @@ def test_run_pipeline_processes_windows_and_extracts_positive_intervals(
         "compute_initial_clip_windows",
         return_value=iter(clip_windows),
     )
+    compute_frame_indices_mock = mocker.patch(
+        f"{ORCHESTRATOR_MODULE_PATH}."
+        "compute_initial_window_frame_indices",
+        side_effect=[
+            [0],
+            [90],
+            [180],
+        ],
+    )
     resolve_device_mock = mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
         "resolve_yolo_device",
@@ -143,7 +152,7 @@ def test_run_pipeline_processes_windows_and_extracts_positive_intervals(
     )
     extract_frames_mock = mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
-        "extract_frames_from_initial_window",
+        "extract_frames_by_indices",
         side_effect=clip_frames,
     )
     process_clip_mock = mocker.patch(
@@ -209,27 +218,39 @@ def test_run_pipeline_processes_windows_and_extracts_positive_intervals(
     assert extract_frames_mock.call_args_list == [
         call(
             source_video_path=cleansed_video_path,
+            frame_indices=[0],
+            device=orchestrator.DECORD_TARGET_DEVICE,
+        ),
+        call(
+            source_video_path=cleansed_video_path,
+            frame_indices=[90],
+            device=orchestrator.DECORD_TARGET_DEVICE,
+        ),
+        call(
+            source_video_path=cleansed_video_path,
+            frame_indices=[180],
+            device=orchestrator.DECORD_TARGET_DEVICE,
+        ),
+    ]
+
+    assert compute_frame_indices_mock.call_args_list == [
+        call(
             window=clip_windows[0],
             video_fps=float(
                 orchestrator.TARGET_FPS
             ),
-            device=orchestrator.DECORD_TARGET_DEVICE,
         ),
         call(
-            source_video_path=cleansed_video_path,
             window=clip_windows[1],
             video_fps=float(
                 orchestrator.TARGET_FPS
             ),
-            device=orchestrator.DECORD_TARGET_DEVICE,
         ),
         call(
-            source_video_path=cleansed_video_path,
             window=clip_windows[2],
             video_fps=float(
                 orchestrator.TARGET_FPS
             ),
-            device=orchestrator.DECORD_TARGET_DEVICE,
         ),
     ]
 
@@ -277,6 +298,10 @@ def test_run_pipeline_processes_windows_and_extracts_positive_intervals(
         )
         assert (
             call_arguments["absolute_frame_indices"]
+            == expected_absolute_frame_indices[clip_index]
+        )
+        assert (
+            call_arguments["pose_detection_frame_indices"]
             == expected_absolute_frame_indices[clip_index]
         )
         assert (
@@ -395,6 +420,14 @@ def test_run_pipeline_returns_empty_list_when_no_attempts_are_detected(
     )
     mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
+        "compute_initial_window_frame_indices",
+        side_effect=[
+            [0],
+            [90],
+        ],
+    )
+    mocker.patch(
+        f"{ORCHESTRATOR_MODULE_PATH}."
         "resolve_yolo_device",
         return_value="cpu",
     )
@@ -410,7 +443,7 @@ def test_run_pipeline_returns_empty_list_when_no_attempts_are_detected(
     )
     extract_frames_mock = mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
-        "extract_frames_from_initial_window",
+        "extract_frames_by_indices",
         side_effect=clip_frames,
     )
     process_clip_mock = mocker.patch(
@@ -485,6 +518,10 @@ def test_run_pipeline_returns_empty_list_when_there_are_no_initial_windows(
         "compute_initial_clip_windows",
         return_value=iter(()),
     )
+    compute_frame_indices_mock = mocker.patch(
+        f"{ORCHESTRATOR_MODULE_PATH}."
+        "compute_initial_window_frame_indices",
+    )
     resolve_device_mock = mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
         "resolve_yolo_device",
@@ -502,7 +539,7 @@ def test_run_pipeline_returns_empty_list_when_there_are_no_initial_windows(
     )
     extract_frames_mock = mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
-        "extract_frames_from_initial_window",
+        "extract_frames_by_indices",
     )
     process_clip_mock = mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
@@ -530,6 +567,7 @@ def test_run_pipeline_returns_empty_list_when_there_are_no_initial_windows(
     load_yolo_mock.assert_called_once()
     construct_classifier_mock.assert_called_once()
 
+    compute_frame_indices_mock.assert_not_called()
     extract_frames_mock.assert_not_called()
     process_clip_mock.assert_not_called()
     select_intervals_mock.assert_not_called()
@@ -645,6 +683,11 @@ def test_run_pipeline_propagates_clip_processing_failure_and_does_not_extract_cl
     )
     mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
+        "compute_initial_window_frame_indices",
+        return_value=[0],
+    )
+    mocker.patch(
+        f"{ORCHESTRATOR_MODULE_PATH}."
         "resolve_yolo_device",
         return_value="cpu",
     )
@@ -660,7 +703,7 @@ def test_run_pipeline_propagates_clip_processing_failure_and_does_not_extract_cl
     )
     mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
-        "extract_frames_from_initial_window",
+        "extract_frames_by_indices",
         return_value=clip_frames,
     )
     process_clip_mock = mocker.patch(
@@ -698,6 +741,7 @@ def test_run_pipeline_propagates_clip_processing_failure_and_does_not_extract_cl
         yolo_device="cpu",
         judo_clip_classifier=classifier_model,
         absolute_frame_indices=[0],
+        pose_detection_frame_indices=[0],
         pose_detection_cache={},
     )
 

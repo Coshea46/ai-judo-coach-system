@@ -19,8 +19,9 @@ from ai_judo_coach.config import(
 )
 from ai_judo_coach.video import(
     compute_initial_clip_windows,
+    compute_initial_window_frame_indices,
     cleanse_input_video,
-    extract_frames_from_initial_window
+    extract_frames_by_indices
 )
 from ai_judo_coach.schemas.internal import(
     InitialClipWindow,
@@ -99,23 +100,28 @@ def run_pipeline(
 
     for clip_interval in clip_windows_metadata_generator:
 
-        # turn clip into bgr numpy list representation
-        clip_interval_as_numpy: list[np.ndarray] = extract_frames_from_initial_window(
-            source_video_path=cleansed_video_path,
-            window=clip_interval,
-            video_fps=float(TARGET_FPS),
-            device=DECORD_TARGET_DEVICE
+        absolute_frame_indices = (
+            compute_initial_window_frame_indices(
+                window=clip_interval,
+                video_fps=float(TARGET_FPS),
+            )
         )
 
-        start_frame_index = int(
-            clip_interval.start_time * float(TARGET_FPS)
-        )
+        pose_detection_frame_indices = [
+            frame_idx
+            for frame_idx in absolute_frame_indices
+            if frame_idx not in pose_detection_cache
+        ]
 
-        absolute_frame_indices = list(
-            range(
-                start_frame_index,
-                start_frame_index
-                + len(clip_interval_as_numpy),
+        # Only decode frames that have not already been processed by
+        # YOLO in an overlapping initial window.
+        clip_interval_as_numpy: list[np.ndarray] = (
+            extract_frames_by_indices(
+                source_video_path=cleansed_video_path,
+                frame_indices=(
+                    pose_detection_frame_indices
+                ),
+                device=DECORD_TARGET_DEVICE
             )
         )
 
@@ -127,6 +133,9 @@ def run_pipeline(
             yolo_device=yolo_device,
             judo_clip_classifier=judo_classifier_model,
             absolute_frame_indices=absolute_frame_indices,
+            pose_detection_frame_indices=(
+                pose_detection_frame_indices
+            ),
             pose_detection_cache=pose_detection_cache
         )
 

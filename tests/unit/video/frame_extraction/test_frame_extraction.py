@@ -13,8 +13,11 @@ from ai_judo_coach.video.frame_extraction.frame_extraction import (
     _check_frame_indices,
     _parse_desired_device,
     _read_video,
+    compute_initial_window_frame_indices,
+    extract_frames_by_indices,
     extract_frames_from_initial_window,
 )
+
 
 
 FRAME_EXTRACTION_MODULE_PATH = (
@@ -797,3 +800,159 @@ def test_check_frame_indices_rejects_invalid_indices(
                 found_frame_indices
             ),
         )
+
+
+
+def test_compute_initial_window_frame_indices_returns_210_indices() -> None:
+    result = compute_initial_window_frame_indices(
+        window=InitialClipWindow(
+            start_time=3.0,
+            end_time=10.0,
+            window_id=1,
+        ),
+        video_fps=30.0,
+    )
+
+    assert result == list(
+        range(
+            90,
+            300,
+        )
+    )
+    assert len(result) == 210
+
+
+def test_extract_frames_by_indices_extracts_requested_frames_in_bgr(
+    mocker,
+) -> None:
+    rgb_frames = np.asarray(
+        [
+            [
+                [
+                    [10, 20, 30],
+                    [40, 50, 60],
+                ],
+            ],
+            [
+                [
+                    [70, 80, 90],
+                    [100, 110, 120],
+                ],
+            ],
+        ],
+        dtype=np.uint8,
+    )
+
+    video_reader = mocker.MagicMock()
+    video_reader.__len__.return_value = 20
+    video_reader.get_batch.return_value = (
+        _FakeBatch(rgb_frames)
+    )
+
+    read_video_mock = mocker.patch(
+        f"{FRAME_EXTRACTION_MODULE_PATH}."
+        "_read_video",
+        return_value=video_reader,
+    )
+
+    result = extract_frames_by_indices(
+        source_video_path="/videos/source.mp4",
+        frame_indices=[
+            9,
+            3,
+        ],
+        device="cpu",
+    )
+
+    read_video_mock.assert_called_once_with(
+        source_video_path="/videos/source.mp4",
+        desired_device="cpu",
+    )
+    video_reader.get_batch.assert_called_once_with(
+        indices=[
+            9,
+            3,
+        ],
+    )
+
+    np.testing.assert_array_equal(
+        result[0],
+        rgb_frames[0, :, :, ::-1],
+    )
+    np.testing.assert_array_equal(
+        result[1],
+        rgb_frames[1, :, :, ::-1],
+    )
+
+    assert result[0].flags.c_contiguous
+    assert result[1].flags.c_contiguous
+
+
+def test_extract_frames_by_indices_returns_early_for_empty_indices(
+    mocker,
+) -> None:
+    read_video_mock = mocker.patch(
+        f"{FRAME_EXTRACTION_MODULE_PATH}."
+        "_read_video",
+    )
+
+    result = extract_frames_by_indices(
+        source_video_path="/videos/source.mp4",
+        frame_indices=[],
+        device="cpu",
+    )
+
+    assert result == []
+    read_video_mock.assert_not_called()
+
+
+def test_extract_frames_by_indices_rejects_negative_index(
+    mocker,
+) -> None:
+    read_video_mock = mocker.patch(
+        f"{FRAME_EXTRACTION_MODULE_PATH}."
+        "_read_video",
+    )
+
+    with pytest.raises(
+        InvalidFrameIndicesError,
+        match="Desired start frame index out of bounds",
+    ):
+        extract_frames_by_indices(
+            source_video_path="/videos/source.mp4",
+            frame_indices=[
+                -1,
+                0,
+            ],
+            device="cpu",
+        )
+
+    read_video_mock.assert_not_called()
+
+
+def test_extract_frames_by_indices_rejects_index_beyond_video(
+    mocker,
+) -> None:
+    video_reader = mocker.MagicMock()
+    video_reader.__len__.return_value = 5
+
+    mocker.patch(
+        f"{FRAME_EXTRACTION_MODULE_PATH}."
+        "_read_video",
+        return_value=video_reader,
+    )
+
+    with pytest.raises(
+        InvalidFrameIndicesError,
+        match="Desired end frame index out of bounds",
+    ):
+        extract_frames_by_indices(
+            source_video_path="/videos/source.mp4",
+            frame_indices=[
+                2,
+                5,
+            ],
+            device="cpu",
+        )
+
+    video_reader.get_batch.assert_not_called()

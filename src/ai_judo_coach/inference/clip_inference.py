@@ -39,6 +39,7 @@ def process_clip(
     yolo_device: str,
     judo_clip_classifier: JudoClipClassifier,
     absolute_frame_indices: list[int] | None = None,
+    pose_detection_frame_indices: list[int] | None = None,
     pose_detection_cache: dict[int, FrameDetections] | None = None,
 ) -> ClipProcessingResult:
     """
@@ -48,24 +49,40 @@ def process_clip(
     The higher-level orchestrator handles looping over clips and
     constructs the model instances once so they can be reused.
 
-    When absolute frame indices and a shared pose-detection cache are
-    supplied, YOLO pose inference is reused across overlapping clips.
-    ByteTrack is still reset and rerun independently for every clip.
+    When absolute frame indices, pose-detection frame indices and a
+    shared pose-detection cache are supplied, YOLO pose inference is
+    reused across overlapping clips. ByteTrack is still reset and
+    rerun independently for every clip.
     """
 
+    cache_arguments = (
+        absolute_frame_indices,
+        pose_detection_frame_indices,
+        pose_detection_cache,
+    )
+
     cache_arguments_are_incomplete = (
-        (absolute_frame_indices is None)
-        != (pose_detection_cache is None)
+        any(
+            argument is not None
+            for argument in cache_arguments
+        )
+        and not all(
+            argument is not None
+            for argument in cache_arguments
+        )
     )
 
     if cache_arguments_are_incomplete:
         raise ValueError(
-            "absolute_frame_indices and pose_detection_cache "
-            "must either both be supplied or both be omitted"
+            "absolute_frame_indices, "
+            "pose_detection_frame_indices and "
+            "pose_detection_cache must either all be supplied "
+            "or all be omitted"
         )
 
     if (
         absolute_frame_indices is not None
+        and pose_detection_frame_indices is not None
         and pose_detection_cache is not None
     ):
         clip_detections = (
@@ -75,6 +92,9 @@ def process_clip(
                 clip_as_numpy=clip_as_numpy,
                 absolute_frame_indices=(
                     absolute_frame_indices
+                ),
+                pose_detection_frame_indices=(
+                    pose_detection_frame_indices
                 ),
                 compute_device=yolo_device,
                 pose_detection_cache=(
