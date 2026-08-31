@@ -139,6 +139,48 @@ def copy_example_video_to_job_input(
 
 
 
+def create_presigned_example_video_preview_url(
+    s3_client: S3Client,
+    bucket_name: str,
+    example: str,
+) -> str:
+    """
+    Create a temporary browser URL for an allowlisted example video.
+
+    Callers select a public example identifier rather than supplying
+    an S3 filename or object key.
+    """
+
+    try:
+        example_filename = (
+            _EXAMPLE_VIDEO_FILENAMES[example]
+        )
+    except KeyError as error:
+        raise ValueError(
+            f"Unknown example video: {example!r}"
+        ) from error
+
+    example_object_key = str(
+        PurePosixPath(
+            _EXAMPLES_PREFIX,
+            example_filename,
+        )
+    )
+
+    return s3_client.generate_presigned_url(
+        ClientMethod="get_object",
+        Params={
+            "Bucket": bucket_name,
+            "Key": example_object_key,
+        },
+        ExpiresIn=(
+            _DEFAULT_PRESIGNED_EXPIRY_SECONDS
+        ),
+    )
+
+
+
+
 def check_input_video_exists(
     s3_client: S3Client,
     bucket_name: str,

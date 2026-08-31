@@ -792,3 +792,79 @@ def test_create_example_job_rejects_unknown_example(
     assert response.status_code == 422
     assert pipeline_worker.spawned_job_ids == []
     assert job_store.records == {}
+
+
+
+
+
+@pytest.mark.parametrize(
+    (
+        "example",
+        "expected_preview_url",
+    ),
+    [
+        (
+            "full",
+            "https://preview.example/full",
+        ),
+        (
+            "short",
+            "https://preview.example/short",
+        ),
+    ],
+)
+def test_preview_example_video_redirects_to_presigned_url(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    example: str,
+    expected_preview_url: str,
+) -> None:
+    received_examples: list[str] = []
+
+    def fake_create_preview_url(
+        *,
+        s3_client: object,
+        bucket_name: str,
+        example: str,
+    ) -> str:
+        assert s3_client is not None
+        assert bucket_name == "test-video-bucket"
+
+        received_examples.append(
+            example
+        )
+
+        return expected_preview_url
+
+    monkeypatch.setattr(
+        routes,
+        "create_presigned_example_video_preview_url",
+        fake_create_preview_url,
+    )
+
+    response = client.get(
+        f"/examples/{example}/preview",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 307
+    assert response.headers["location"] == (
+        expected_preview_url
+    )
+    assert response.headers["cache-control"] == (
+        "no-store"
+    )
+    assert received_examples == [
+        example,
+    ]
+
+
+def test_preview_example_video_rejects_unknown_example(
+    client: TestClient,
+) -> None:
+    response = client.get(
+        "/examples/private/preview",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
