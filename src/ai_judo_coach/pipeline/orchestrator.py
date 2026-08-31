@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 
 from ai_judo_coach.config import(
-    CLIP_STRIDE_SEC, 
+    CLIP_STRIDE_SEC,
     CLIP_DURATION_SEC,
     TARGET_FPS,
     DECORD_TARGET_DEVICE,
@@ -33,6 +33,9 @@ from ai_judo_coach.inference import(
     resolve_yolo_device,
     load_yolo_model,
     construct_classifier
+)
+from ai_judo_coach.inference.inference_schemas import (
+    FrameDetections,
 )
 from ai_judo_coach.attempt_clip_generation import(
     select_new_intervals,
@@ -71,7 +74,7 @@ def run_pipeline(
         input_video_path=cleansed_video_path,
         individual_window_duration=float(CLIP_DURATION_SEC),
         stride=float(CLIP_STRIDE_SEC)
-    )  
+    )
 
     # instantiate models for inference
     yolo_device = resolve_yolo_device(
@@ -90,6 +93,10 @@ def run_pipeline(
     # should store the surviving InitialClipWindow objects and their probabilities (those that have a throw in them)
     initial_throw_attempt_intervals: list[DetectedAttemptWindow] = []
 
+    # Cache untracked pose detections by absolute frame index so
+    # overlapping windows do not repeat YOLO pose inference.
+    pose_detection_cache: dict[int, FrameDetections] = {}
+
     for clip_interval in clip_windows_metadata_generator:
 
         # turn clip into bgr numpy list representation
@@ -100,15 +107,28 @@ def run_pipeline(
             device=DECORD_TARGET_DEVICE
         )
 
+        start_frame_index = int(
+            clip_interval.start_time * float(TARGET_FPS)
+        )
+
+        absolute_frame_indices = list(
+            range(
+                start_frame_index,
+                start_frame_index
+                + len(clip_interval_as_numpy),
+            )
+        )
+
         clip_result: ClipProcessingResult = process_clip(
             clip_as_numpy=clip_interval_as_numpy,
             clip_id=str(clip_interval.window_id),
             yolo_model=yolo_model,
             yolo_tracker_path=BYTETRACK_CONFIG_PATH,
             yolo_device=yolo_device,
-            judo_clip_classifier=judo_classifier_model
+            judo_clip_classifier=judo_classifier_model,
+            absolute_frame_indices=absolute_frame_indices,
+            pose_detection_cache=pose_detection_cache
         )
-
 
         if clip_result.contains_throw_attempt:
             initial_throw_attempt_intervals.append(
@@ -118,11 +138,9 @@ def run_pipeline(
                 )
             )
 
-
     # no detected attempts is a valid pipeline result
     if not initial_throw_attempt_intervals:
         return []
-
 
     # now create clips to return to the user
     revised_intervals = select_new_intervals(
@@ -144,6 +162,5 @@ def run_pipeline(
         source_video_path=cleansed_video_path,
         desired_fps=TARGET_FPS
     )
-
 
     return final_clips

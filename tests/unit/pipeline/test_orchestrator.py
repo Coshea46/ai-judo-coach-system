@@ -235,6 +235,18 @@ def test_run_pipeline_processes_windows_and_extracts_positive_intervals(
 
     assert process_clip_mock.call_count == 3
 
+    expected_absolute_frame_indices = [
+        [0],
+        [90],
+        [180],
+    ]
+
+    shared_pose_detection_cache = (
+        process_clip_mock
+        .call_args_list[0]
+        .kwargs["pose_detection_cache"]
+    )
+
     for clip_index, process_call in enumerate(
         process_clip_mock.call_args_list
     ):
@@ -262,6 +274,14 @@ def test_run_pipeline_processes_windows_and_extracts_positive_intervals(
         assert (
             call_arguments["judo_clip_classifier"]
             is classifier_model
+        )
+        assert (
+            call_arguments["absolute_frame_indices"]
+            == expected_absolute_frame_indices[clip_index]
+        )
+        assert (
+            call_arguments["pose_detection_cache"]
+            is shared_pose_detection_cache
         )
 
     select_intervals_mock.assert_called_once_with(
@@ -677,6 +697,8 @@ def test_run_pipeline_propagates_clip_processing_failure_and_does_not_extract_cl
         ),
         yolo_device="cpu",
         judo_clip_classifier=classifier_model,
+        absolute_frame_indices=[0],
+        pose_detection_cache={},
     )
 
     select_intervals_mock.assert_not_called()
