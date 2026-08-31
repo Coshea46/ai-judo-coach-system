@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import math
 import json
+import math
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from time import perf_counter
@@ -46,17 +46,6 @@ _PROCESSING_CLEANSED_FILENAME: Final[str] = (
 )
 
 _DISTRIBUTED_GROUP_COUNT: Final[int] = 4
-
-_NVENC_VIDEO_OUTPUT_OPTIONS: Final[
-    dict[str, object]
-] = {
-    "vcodec": "h264_nvenc",
-    "preset": "p4",
-    "tune": "lossless",
-    "rc": "constqp",
-    "qp": 0,
-    "pix_fmt": "yuv420p",
-}
 
 
 app = modal.App(
@@ -169,7 +158,7 @@ def cleanse_video_job(
     cleansed_object_key: str,
 ) -> dict[str, object]:
     """
-    Download and cleanse one input video using T4 NVENC.
+    Download and cleanse one input video using production semantics.
 
     Audio removal and frame-rate normalisation remain two distinct
     stages. The cleansed video is uploaded for distributed workers.
@@ -226,9 +215,6 @@ def cleanse_video_job(
             output_directory=str(
                 temporary_path
             ),
-            video_output_options=dict(
-                _NVENC_VIDEO_OUTPUT_OPTIONS
-            ),
         )
 
         cleanse_seconds = (
@@ -267,8 +253,8 @@ def cleanse_video_job(
         )
 
         return {
-            "cleansed_video_duration": (
-                float(cleansed_video_duration)
+            "cleansed_video_duration": float(
+                cleansed_video_duration
             ),
             "timings": {
                 "download_input_seconds": (
@@ -766,7 +752,6 @@ def process_video_job(
                 flush=True,
             )
 
-
             return result
 
     finally:
@@ -785,7 +770,6 @@ def process_video_job(
                 f"{cleanup_error}",
                 flush=True,
             )
-
 
 
 @app.function(
@@ -888,7 +872,9 @@ def _partition_contiguous_work_items(
                 "an empty group"
             )
 
-        groups.append(group)
+        groups.append(
+            group
+        )
         next_item_index = group_end_index
 
     flattened_items = [
@@ -1013,7 +999,9 @@ def _deserialise_window_work_item(
             ),
             window_id=window_id,
         ),
-        list(absolute_frame_indices),
+        list(
+            absolute_frame_indices
+        ),
     )
 
 
@@ -1064,10 +1052,13 @@ def _deserialise_clip_processing_result(
         )
     )
 
-    if not isinstance(
-        clip_id,
-        str,
-    ) or not clip_id:
+    if (
+        not isinstance(
+            clip_id,
+            str,
+        )
+        or not clip_id
+    ):
         raise TypeError(
             "clip_id must be a non-empty string"
         )
@@ -1081,7 +1072,10 @@ def _deserialise_clip_processing_result(
         )
 
     if (
-        isinstance(attempt_probability, bool)
+        isinstance(
+            attempt_probability,
+            bool,
+        )
         or not isinstance(
             attempt_probability,
             (int, float),
@@ -1102,10 +1096,13 @@ def _deserialise_clip_processing_result(
             "attempt_probability must be finite"
         )
 
-    if not isinstance(
-        predicted_class_name,
-        str,
-    ) or not predicted_class_name:
+    if (
+        not isinstance(
+            predicted_class_name,
+            str,
+        )
+        or not predicted_class_name
+    ):
         raise TypeError(
             "predicted_class_name must be a "
             "non-empty string"
@@ -1173,7 +1170,9 @@ def _validate_and_order_group_responses(
         ] = response
 
     expected_indices = list(
-        range(expected_group_count)
+        range(
+            expected_group_count
+        )
     )
     actual_indices = sorted(
         responses_by_group
