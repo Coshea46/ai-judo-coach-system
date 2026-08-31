@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import math
 import json
+import math
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from time import perf_counter
@@ -169,12 +169,17 @@ def cleanse_video_job(
     cleansed_object_key: str,
 ) -> dict[str, object]:
     """
-    Download and cleanse one input video using T4 NVENC.
+    Download and cleanse one input video using lossless T4 NVENC.
 
     Audio removal and frame-rate normalisation remain two distinct
-    stages. The cleansed video is uploaded for distributed workers.
+    stages. Window work items are built before the cleansed video is
+    uploaded so the coordinator can launch inference workers without
+    first downloading and probing the complete video.
     """
 
+    from ai_judo_coach.pipeline.distributed_stages import (
+        build_window_work_items,
+    )
     from ai_judo_coach.storage import (
         download_input_video,
     )
@@ -245,6 +250,34 @@ def cleanse_video_job(
                 f"{cleansed_video_path}"
             )
 
+        work_item_build_started_at = (
+            perf_counter()
+        )
+
+        work_items = build_window_work_items(
+            cleansed_video_path=str(
+                cleansed_video_path
+            ),
+        )
+
+        if not work_items:
+            raise RuntimeError(
+                "The cleansed video did not produce "
+                "any classifier windows"
+            )
+
+        serialised_work_items = [
+            _serialise_window_work_item(
+                work_item
+            )
+            for work_item in work_items
+        ]
+
+        work_item_build_seconds = (
+            perf_counter()
+            - work_item_build_started_at
+        )
+
         upload_started_at = perf_counter()
 
         s3_client.upload_file(
@@ -267,8 +300,11 @@ def cleanse_video_job(
         )
 
         return {
-            "cleansed_video_duration": (
-                float(cleansed_video_duration)
+            "cleansed_video_duration": float(
+                cleansed_video_duration
+            ),
+            "serialised_work_items": (
+                serialised_work_items
             ),
             "timings": {
                 "download_input_seconds": (
@@ -276,6 +312,9 @@ def cleanse_video_job(
                 ),
                 "two_stage_cleanse_seconds": (
                     cleanse_seconds
+                ),
+                "work_item_build_seconds": (
+                    work_item_build_seconds
                 ),
                 "upload_cleansed_seconds": (
                     upload_seconds
@@ -304,8 +343,8 @@ def process_window_group_job(
     """
     Process one contiguous classifier-window group on one T4.
 
-    Each worker downloads the cleansed video once and returns only
-    ordered primitive classification results and stage timings.
+    Each worker downloads the cleansed video once and returns ordered
+    primitive classification results and stage timings.
     """
 
     from ai_judo_coach.pipeline.distributed_stages import (
@@ -422,12 +461,12 @@ def process_video_job(
     """
     Coordinate cleansing, distributed inference and clip generation.
 
-    Four contiguous window groups are processed concurrently when the
-    video contains at least four classifier windows.
+    The inference workers are launched before the coordinator downloads
+    its own copy of the cleansed video. This overlaps the coordinator
+    download with distributed pose inference.
     """
 
     from ai_judo_coach.pipeline.distributed_stages import (
-        build_window_work_items,
         finalise_window_results,
     )
     from ai_judo_coach.storage import (
@@ -477,6 +516,54 @@ def process_video_job(
                 "video duration"
             )
 
+        serialised_work_items = cleanse_result.get(
+            "serialised_work_items"
+        )
+
+        if not isinstance(
+            serialised_work_items,
+            list,
+        ):
+            raise TypeError(
+                "Cleanse worker must return "
+                "serialised_work_items as a list"
+            )
+
+        if any(
+            not isinstance(
+                serialised_work_item,
+                dict,
+            )
+            for serialised_work_item
+            in serialised_work_items
+        ):
+            raise TypeError(
+                "Every serialised work item must be a dictionary"
+            )
+
+        work_items = [
+            _deserialise_window_work_item(
+                serialised_work_item
+            )
+            for serialised_work_item
+            in serialised_work_items
+        ]
+
+        if not work_items:
+            raise RuntimeError(
+                "The cleansed video did not produce "
+                "any classifier windows"
+            )
+
+        window_groups = (
+            _partition_contiguous_work_items(
+                work_items=work_items,
+                maximum_group_count=(
+                    _DISTRIBUTED_GROUP_COUNT
+                ),
+            )
+        )
+
         with TemporaryDirectory(
             prefix="ai-judo-coordinator-",
         ) as temporary_directory:
@@ -497,53 +584,8 @@ def process_video_job(
                 exist_ok=True,
             )
 
-            coordinator_download_started_at = (
-                perf_counter()
-            )
-
-            s3_client.download_file(
-                Bucket=bucket_name,
-                Key=cleansed_object_key,
-                Filename=str(
-                    cleansed_video_path
-                ),
-            )
-
-            coordinator_download_seconds = (
-                perf_counter()
-                - coordinator_download_started_at
-            )
-
-            work_item_build_started_at = (
-                perf_counter()
-            )
-
-            work_items = build_window_work_items(
-                cleansed_video_path=str(
-                    cleansed_video_path
-                ),
-            )
-
-            work_item_build_seconds = (
-                perf_counter()
-                - work_item_build_started_at
-            )
-
-            if not work_items:
-                raise RuntimeError(
-                    "The cleansed video did not produce "
-                    "any classifier windows"
-                )
-
-            window_groups = (
-                _partition_contiguous_work_items(
-                    work_items=work_items,
-                    maximum_group_count=(
-                        _DISTRIBUTED_GROUP_COUNT
-                    ),
-                )
-            )
-
+            # Launch inference workers before downloading the
+            # coordinator's copy of the cleansed video.
             fanout_started_at = perf_counter()
 
             group_calls = [
@@ -563,6 +605,23 @@ def process_video_job(
                     window_groups
                 )
             ]
+
+            coordinator_download_started_at = (
+                perf_counter()
+            )
+
+            s3_client.download_file(
+                Bucket=bucket_name,
+                Key=cleansed_object_key,
+                Filename=str(
+                    cleansed_video_path
+                ),
+            )
+
+            coordinator_download_seconds = (
+                perf_counter()
+                - coordinator_download_started_at
+            )
 
             group_responses = [
                 group_call.get()
@@ -637,18 +696,16 @@ def process_video_job(
             ] = []
 
             for generated_clip in generated_clips:
-                object_key = (
-                    upload_generated_clip(
-                        s3_client=s3_client,
-                        bucket_name=bucket_name,
-                        job_id=job_id,
-                        clip_id=(
-                            generated_clip.clip_id
-                        ),
-                        local_clip_path=(
-                            generated_clip.file_path
-                        ),
-                    )
+                object_key = upload_generated_clip(
+                    s3_client=s3_client,
+                    bucket_name=bucket_name,
+                    job_id=job_id,
+                    clip_id=(
+                        generated_clip.clip_id
+                    ),
+                    local_clip_path=(
+                        generated_clip.file_path
+                    ),
                 )
 
                 uploaded_clips.append(
@@ -677,21 +734,34 @@ def process_video_job(
                 - coordinator_started_at
             )
 
+            cleanse_timings = cleanse_result.get(
+                "timings",
+                {},
+            )
+
+            if not isinstance(
+                cleanse_timings,
+                dict,
+            ):
+                raise TypeError(
+                    "Cleanse worker timings must be a dictionary"
+                )
+
             result = {
                 "job_id": job_id,
                 "clips": uploaded_clips,
                 "timings": {
                     "cleanse_worker": (
-                        cleanse_result.get(
-                            "timings",
-                            {},
-                        )
+                        cleanse_timings
                     ),
                     "coordinator_download_cleansed_seconds": (
                         coordinator_download_seconds
                     ),
                     "work_item_build_seconds": (
-                        work_item_build_seconds
+                        cleanse_timings.get(
+                            "work_item_build_seconds",
+                            0.0,
+                        )
                     ),
                     "distributed_group_count": len(
                         window_groups
@@ -766,7 +836,6 @@ def process_video_job(
                 flush=True,
             )
 
-
             return result
 
     finally:
@@ -785,7 +854,6 @@ def process_video_job(
                 f"{cleanup_error}",
                 flush=True,
             )
-
 
 
 @app.function(
@@ -888,7 +956,9 @@ def _partition_contiguous_work_items(
                 "an empty group"
             )
 
-        groups.append(group)
+        groups.append(
+            group
+        )
         next_item_index = group_end_index
 
     flattened_items = [
@@ -1013,7 +1083,9 @@ def _deserialise_window_work_item(
             ),
             window_id=window_id,
         ),
-        list(absolute_frame_indices),
+        list(
+            absolute_frame_indices
+        ),
     )
 
 
@@ -1064,10 +1136,13 @@ def _deserialise_clip_processing_result(
         )
     )
 
-    if not isinstance(
-        clip_id,
-        str,
-    ) or not clip_id:
+    if (
+        not isinstance(
+            clip_id,
+            str,
+        )
+        or not clip_id
+    ):
         raise TypeError(
             "clip_id must be a non-empty string"
         )
@@ -1081,7 +1156,10 @@ def _deserialise_clip_processing_result(
         )
 
     if (
-        isinstance(attempt_probability, bool)
+        isinstance(
+            attempt_probability,
+            bool,
+        )
         or not isinstance(
             attempt_probability,
             (int, float),
@@ -1102,10 +1180,13 @@ def _deserialise_clip_processing_result(
             "attempt_probability must be finite"
         )
 
-    if not isinstance(
-        predicted_class_name,
-        str,
-    ) or not predicted_class_name:
+    if (
+        not isinstance(
+            predicted_class_name,
+            str,
+        )
+        or not predicted_class_name
+    ):
         raise TypeError(
             "predicted_class_name must be a "
             "non-empty string"
@@ -1173,7 +1254,9 @@ def _validate_and_order_group_responses(
         ] = response
 
     expected_indices = list(
-        range(expected_group_count)
+        range(
+            expected_group_count
+        )
     )
     actual_indices = sorted(
         responses_by_group
