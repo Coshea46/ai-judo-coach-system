@@ -4,7 +4,10 @@ from typing import Any
 
 import ffmpeg
 
-from ai_judo_coach.config import TARGET_FPS
+from ai_judo_coach.config import (
+    MAX_INPUT_VIDEO_DURATION_SEC,
+    TARGET_FPS,
+)
 from ai_judo_coach.exceptions import InvalidVideoError
 
 from .normalize import normalize_video_fps
@@ -31,6 +34,25 @@ def cleanse_input_video(
         A pair containing the cleansed video path and its duration
         in seconds.
     """
+
+    input_path = Path(
+        input_video_path
+    )
+
+    input_video_duration = (
+        _get_video_duration_seconds(
+            video_path=input_path,
+        )
+    )
+
+    if (
+        input_video_duration
+        > MAX_INPUT_VIDEO_DURATION_SEC
+    ):
+        raise InvalidVideoError(
+            "Input video duration must not exceed "
+            f"{MAX_INPUT_VIDEO_DURATION_SEC / 60.0:g} minutes"
+        )
 
     cleanse_output_directory = (
         Path(output_directory)
