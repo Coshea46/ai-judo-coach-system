@@ -680,16 +680,43 @@ def test_read_job_status_caches_safe_worker_failure(
     }
 
 
-def test_create_example_job_copies_video_and_spawns_worker(
+
+
+@pytest.mark.parametrize(
+    (
+        "request_path",
+        "expected_example",
+    ),
+    [
+        (
+            "/examples",
+            "full",
+        ),
+        (
+            "/examples?example=full",
+            "full",
+        ),
+        (
+            "/examples?example=short",
+            "short",
+        ),
+    ],
+)
+def test_create_example_job_copies_selected_video_and_spawns_worker(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     s3_client: object,
     bucket_name: str,
     job_store: FakeJobStore,
     pipeline_worker: FakePipelineWorker,
+    request_path: str,
+    expected_example: str,
 ) -> None:
     job_id = "f15e8213-07dd-42c5-ab0f-f8913176fe44"
-    copied_job_ids: list[str] = []
+
+    copied_examples: list[
+        tuple[str, str]
+    ] = []
 
     monkeypatch.setattr(
         routes.uuid,
@@ -702,11 +729,17 @@ def test_create_example_job_copies_video_and_spawns_worker(
         s3_client: object,
         bucket_name: str,
         job_id: str,
+        example: str,
     ) -> str:
         assert s3_client is not None
         assert bucket_name == "test-video-bucket"
 
-        copied_job_ids.append(job_id)
+        copied_examples.append(
+            (
+                job_id,
+                example,
+            )
+        )
 
         return (
             f"jobs/{job_id}/input/source.mp4"
@@ -718,7 +751,9 @@ def test_create_example_job_copies_video_and_spawns_worker(
         fake_copy_example_video_to_job_input,
     )
 
-    response = client.post("/examples")
+    response = client.post(
+        request_path
+    )
 
     assert response.status_code == 202
     assert response.json() == {
@@ -726,15 +761,34 @@ def test_create_example_job_copies_video_and_spawns_worker(
         "status": "processing",
     }
 
-    assert copied_job_ids == [
-        job_id,
+    assert copied_examples == [
+        (
+            job_id,
+            expected_example,
+        ),
     ]
+
     assert pipeline_worker.spawned_job_ids == [
         job_id,
     ]
+
     assert job_store.records[job_id] == {
         "status": "processing",
         "modal_call_id": "fc-test-call-id",
         "clips": None,
         "error": None,
     }
+
+
+def test_create_example_job_rejects_unknown_example(
+    client: TestClient,
+    job_store: FakeJobStore,
+    pipeline_worker: FakePipelineWorker,
+) -> None:
+    response = client.post(
+        "/examples?example=private"
+    )
+
+    assert response.status_code == 422
+    assert pipeline_worker.spawned_job_ids == []
+    assert job_store.records == {}

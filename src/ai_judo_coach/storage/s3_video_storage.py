@@ -32,9 +32,13 @@ _MAX_INPUT_VIDEO_SIZE_BYTES: Final[int] = 2 * 1024**3
 _MIN_INPUT_VIDEO_SIZE_BYTES: Final[int] = 1
 
 _EXAMPLES_PREFIX: Final[str] = "examples"
-_EXAMPLE_VIDEO_FILENAME: Final[str] = (
-    "example_judo_match.mp4"
-)
+_EXAMPLE_VIDEO_FILENAMES: Final[
+    dict[str, str]
+] = {
+    "full": "example_judo_match.mp4",
+    "short": "shorter_example_match.mp4",
+}
+
 
 
 class PresignedBrowserUpload(TypedDict):
@@ -89,6 +93,7 @@ def copy_example_video_to_job_input(
     s3_client: S3Client,
     bucket_name: str,
     job_id: str,
+    example: str = "full",
 ) -> str:
     """
     Copy the example video to a new job's input object key.
@@ -97,12 +102,22 @@ def copy_example_video_to_job_input(
     example object to the browser.
     """
 
+    try:
+        example_filename = (
+            _EXAMPLE_VIDEO_FILENAMES[example]
+        )
+    except KeyError as error:
+        raise ValueError(
+            f"Unknown example video: {example!r}"
+        ) from error
+
     source_object_key = str(
         PurePosixPath(
             _EXAMPLES_PREFIX,
-            _EXAMPLE_VIDEO_FILENAME,
+            example_filename,
         )
     )
+
     destination_object_key = (
         _construct_input_video_s3_path(
             job_id=job_id,

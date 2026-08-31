@@ -5,6 +5,7 @@ from botocore.exceptions import ClientError
 
 from ai_judo_coach.storage import (
     check_input_video_exists,
+    copy_example_video_to_job_input,
     create_presigned_generated_clip_download_url,
     create_presigned_upload_post,
     download_input_video,
@@ -502,3 +503,93 @@ def test_create_presigned_generated_clip_download_url_rejects_empty_key(
         )
 
     s3_client.generate_presigned_url.assert_not_called()
+
+
+
+
+@pytest.mark.parametrize(
+    (
+        "example",
+        "expected_source_key",
+    ),
+    [
+        (
+            "full",
+            "examples/example_judo_match.mp4",
+        ),
+        (
+            "short",
+            "examples/shorter_example_match.mp4",
+        ),
+    ],
+)
+def test_copy_example_video_to_job_input_uses_selected_example(
+    mocker,
+    example: str,
+    expected_source_key: str,
+) -> None:
+    s3_client = mocker.Mock()
+
+    result = copy_example_video_to_job_input(
+        s3_client=s3_client,
+        bucket_name="test-bucket",
+        job_id="job-123",
+        example=example,
+    )
+
+    assert result == (
+        "jobs/job-123/input/source.mp4"
+    )
+
+    s3_client.copy_object.assert_called_once_with(
+        CopySource={
+            "Bucket": "test-bucket",
+            "Key": expected_source_key,
+        },
+        Bucket="test-bucket",
+        Key="jobs/job-123/input/source.mp4",
+        ContentType="video/mp4",
+        MetadataDirective="REPLACE",
+    )
+
+
+def test_copy_example_video_to_job_input_defaults_to_full_example(
+    mocker,
+) -> None:
+    s3_client = mocker.Mock()
+
+    copy_example_video_to_job_input(
+        s3_client=s3_client,
+        bucket_name="test-bucket",
+        job_id="job-123",
+    )
+
+    s3_client.copy_object.assert_called_once_with(
+        CopySource={
+            "Bucket": "test-bucket",
+            "Key": "examples/example_judo_match.mp4",
+        },
+        Bucket="test-bucket",
+        Key="jobs/job-123/input/source.mp4",
+        ContentType="video/mp4",
+        MetadataDirective="REPLACE",
+    )
+
+
+def test_copy_example_video_to_job_input_rejects_unknown_example(
+    mocker,
+) -> None:
+    s3_client = mocker.Mock()
+
+    with pytest.raises(
+        ValueError,
+        match="Unknown example video",
+    ):
+        copy_example_video_to_job_input(
+            s3_client=s3_client,
+            bucket_name="test-bucket",
+            job_id="job-123",
+            example="../../private-video",
+        )
+
+    s3_client.copy_object.assert_not_called()
