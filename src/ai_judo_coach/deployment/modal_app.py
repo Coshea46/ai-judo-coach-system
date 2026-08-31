@@ -52,8 +52,9 @@ _NVENC_VIDEO_OUTPUT_OPTIONS: Final[
 ] = {
     "vcodec": "h264_nvenc",
     "preset": "p4",
-    "cq": 23,
-    "b:v": "0",
+    "tune": "lossless",
+    "rc": "constqp",
+    "qp": 0,
     "pix_fmt": "yuv420p",
 }
 
@@ -737,12 +738,34 @@ def process_video_job(
                             "process_video_job_completed"
                         ),
                         "job_id": job_id,
+                        "window_results": [
+                            {
+                                "clip_id": (
+                                    window_result.clip_id
+                                ),
+                                "contains_throw_attempt": (
+                                    window_result
+                                    .contains_throw_attempt
+                                ),
+                                "attempt_probability": (
+                                    window_result
+                                    .attempt_probability
+                                ),
+                                "predicted_class_name": (
+                                    window_result
+                                    .predicted_class_name
+                                ),
+                            }
+                            for window_result
+                            in ordered_results
+                        ],
                         "timings": result["timings"],
                     },
                     sort_keys=True,
                 ),
                 flush=True,
             )
+
 
             return result
 
