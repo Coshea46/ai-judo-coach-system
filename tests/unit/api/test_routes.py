@@ -678,3 +678,63 @@ def test_read_job_status_caches_safe_worker_failure(
         "clips": None,
         "error": "Video processing failed",
     }
+
+
+def test_create_example_job_copies_video_and_spawns_worker(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    s3_client: object,
+    bucket_name: str,
+    job_store: FakeJobStore,
+    pipeline_worker: FakePipelineWorker,
+) -> None:
+    job_id = "f15e8213-07dd-42c5-ab0f-f8913176fe44"
+    copied_job_ids: list[str] = []
+
+    monkeypatch.setattr(
+        routes.uuid,
+        "uuid4",
+        lambda: job_id,
+    )
+
+    def fake_copy_example_video_to_job_input(
+        *,
+        s3_client: object,
+        bucket_name: str,
+        job_id: str,
+    ) -> str:
+        assert s3_client is not None
+        assert bucket_name == "test-video-bucket"
+
+        copied_job_ids.append(job_id)
+
+        return (
+            f"jobs/{job_id}/input/source.mp4"
+        )
+
+    monkeypatch.setattr(
+        routes,
+        "copy_example_video_to_job_input",
+        fake_copy_example_video_to_job_input,
+    )
+
+    response = client.post("/examples")
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "job_id": job_id,
+        "status": "processing",
+    }
+
+    assert copied_job_ids == [
+        job_id,
+    ]
+    assert pipeline_worker.spawned_job_ids == [
+        job_id,
+    ]
+    assert job_store.records[job_id] == {
+        "status": "processing",
+        "modal_call_id": "fc-test-call-id",
+        "clips": None,
+        "error": None,
+    }

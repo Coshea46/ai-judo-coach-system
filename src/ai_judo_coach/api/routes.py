@@ -11,9 +11,11 @@ from fastapi import(
 
 from ai_judo_coach.storage import(
     check_input_video_exists,
+    copy_example_video_to_job_input,
     create_presigned_generated_clip_download_url,
     create_presigned_upload_post
 )
+
 
 from ai_judo_coach.api.dependencies import (
     get_bucket_name,
@@ -323,4 +325,59 @@ def read_job_status(
         "status": "completed",
         "clips": downloadable_clips,
         "error": None,
+    }
+
+
+
+@router.post(
+    "/examples",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=SubmitJobResponse,
+)
+def create_example_job(
+    s3_client: Annotated[Any, Depends(get_s3_client)],
+    bucket_name: Annotated[str, Depends(get_bucket_name)],
+    job_store: Annotated[modal.Dict, Depends(get_job_store)],
+    modal_pipeline_worker: Annotated[Any, Depends(get_pipeline_worker)]
+) -> dict[str, str]:
+    """
+    Create and submit a processing job using the example video.
+    """
+
+    job_id = str(uuid.uuid4())
+
+    copy_example_video_to_job_input(
+        s3_client=s3_client,
+        bucket_name=bucket_name,
+        job_id=job_id,
+    )
+
+    job_store.put(
+        job_id,
+        {
+            "status": "awaiting_upload",
+            "modal_call_id": None,
+            "clips": None,
+            "error": None,
+        },
+        skip_if_exists=True,
+    )
+
+    function_call = modal_pipeline_worker.spawn(
+        job_id
+    )
+
+    job_store.put(
+        job_id,
+        {
+            "status": "processing",
+            "modal_call_id": function_call.object_id,
+            "clips": None,
+            "error": None,
+        },
+    )
+
+    return {
+        "job_id": job_id,
+        "status": "processing",
     }

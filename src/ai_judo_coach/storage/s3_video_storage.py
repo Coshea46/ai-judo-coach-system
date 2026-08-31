@@ -31,6 +31,11 @@ _DEFAULT_PRESIGNED_EXPIRY_SECONDS: Final[int] = 3600
 _MAX_INPUT_VIDEO_SIZE_BYTES: Final[int] = 2 * 1024**3
 _MIN_INPUT_VIDEO_SIZE_BYTES: Final[int] = 1
 
+_EXAMPLES_PREFIX: Final[str] = "examples"
+_EXAMPLE_VIDEO_FILENAME: Final[str] = (
+    "example_judo_match.mp4"
+)
+
 
 class PresignedBrowserUpload(TypedDict):
     """Information required to upload a video directly to S3."""
@@ -78,6 +83,45 @@ def create_presigned_upload_post(
         url=response["url"],
         fields=response["fields"],
     )
+
+
+def copy_example_video_to_job_input(
+    s3_client: S3Client,
+    bucket_name: str,
+    job_id: str,
+) -> str:
+    """
+    Copy the example video to a new job's input object key.
+
+    The copy occurs entirely within S3 and does not expose the private
+    example object to the browser.
+    """
+
+    source_object_key = str(
+        PurePosixPath(
+            _EXAMPLES_PREFIX,
+            _EXAMPLE_VIDEO_FILENAME,
+        )
+    )
+    destination_object_key = (
+        _construct_input_video_s3_path(
+            job_id=job_id,
+        )
+    )
+
+    s3_client.copy_object(
+        CopySource={
+            "Bucket": bucket_name,
+            "Key": source_object_key,
+        },
+        Bucket=bucket_name,
+        Key=destination_object_key,
+        ContentType=_VIDEO_CONTENT_TYPE,
+        MetadataDirective="REPLACE",
+    )
+
+    return destination_object_key
+
 
 
 def check_input_video_exists(
