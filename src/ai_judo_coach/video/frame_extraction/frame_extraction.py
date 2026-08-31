@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+
 import numpy as np
 import decord
 from decord import VideoReader, cpu, gpu  # using decord since significantly faster and more accurate than OpenCV2
@@ -127,6 +129,61 @@ def extract_frames_by_indices(
         video_reader=video_reader,
         frame_indices=frame_indices,
     )
+
+
+
+def iter_bgr_frame_batches_by_indices(
+    source_video_path: str,
+    frame_indices: list[int],
+    device: str,
+    batch_size: int,
+) -> Iterator[tuple[list[int], list[np.ndarray]]]:
+    """
+    Decode exact absolute frame indices in bounded BGR batches.
+
+    Frame order is preserved. At most batch_size decoded frames are
+    retained by this iterator at one time.
+    """
+
+    if batch_size <= 0:
+        raise ValueError("batch_size must be greater than zero")
+
+    if not frame_indices:
+        return
+
+    if min(frame_indices) < 0:
+        raise InvalidFrameIndicesError(
+            "Desired start frame index out of bounds"
+        )
+
+    if frame_indices != sorted(set(frame_indices)):
+        raise InvalidFrameIndicesError(
+            "frame_indices must contain unique indices in ascending order"
+        )
+
+    video_reader = _read_video(
+        source_video_path=source_video_path,
+        desired_device=device,
+    )
+
+    if frame_indices[-1] >= len(video_reader):
+        raise InvalidFrameIndicesError(
+            "Desired end frame index out of bounds"
+        )
+
+    for batch_start in range(0, len(frame_indices), batch_size):
+        batch_indices = frame_indices[
+            batch_start:batch_start + batch_size
+        ]
+
+        yield (
+            batch_indices,
+            _extract_bgr_frames(
+                video_reader=video_reader,
+                frame_indices=batch_indices,
+            ),
+        )
+
 
 
 def _extract_bgr_frames(

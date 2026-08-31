@@ -12,8 +12,11 @@ from ai_judo_coach.inference.inference_schemas import (
     FrameDetections,
     PersonDetection,
 )
-
+from ai_judo_coach.video import (
+    iter_bgr_frame_batches_by_indices,
+)
 from .results_adapter import result_to_frame_detections
+
 
 
 def collect_pose_detection_cache_from_video(
@@ -118,6 +121,96 @@ def collect_pose_detection_cache_from_video(
         )
 
     return pose_detection_cache
+
+
+def collect_pose_detection_cache_from_frame_indices(
+    yolo_model: YOLO,
+    source_video_path: str,
+    required_frame_indices: list[int],
+    compute_device: str | int,
+    decoder_device: str,
+    inference_batch_size: int = 1,
+) -> dict[int, FrameDetections]:
+    """
+    Collect lean FP32 pose detections for exact absolute frame indices.
+
+    Decoding and inference are bounded by inference_batch_size. Results
+    and source frames are discarded immediately after conversion.
+    """
+
+    if not required_frame_indices:
+        return {}
+
+    if inference_batch_size <= 0:
+        raise ValueError(
+            "inference_batch_size must be greater than zero"
+        )
+
+    if required_frame_indices != sorted(
+        set(required_frame_indices)
+    ):
+        raise ValueError(
+            "required_frame_indices must contain unique indices "
+            "in ascending order"
+        )
+
+    pose_detection_cache: dict[int, FrameDetections] = {}
+
+    for batch_indices, bgr_frames in (
+        iter_bgr_frame_batches_by_indices(
+            source_video_path=source_video_path,
+            frame_indices=required_frame_indices,
+            device=decoder_device,
+            batch_size=inference_batch_size,
+        )
+    ):
+        prediction_results = yolo_model.predict(
+            source=bgr_frames,
+            conf=0.1,
+            batch=len(bgr_frames),
+            device=compute_device,
+            verbose=False,
+        )
+
+        if len(prediction_results) != len(batch_indices):
+            raise RuntimeError(
+                "YOLO result count does not match the supplied "
+                f"frame count: {len(prediction_results)} != "
+                f"{len(batch_indices)}"
+            )
+
+        for absolute_frame_idx, result in zip(
+            batch_indices,
+            prediction_results,
+            strict=True,
+        ):
+            frame_detections = result_to_frame_detections(
+                yolo_frame_result=result,
+                frame_idx=absolute_frame_idx,
+            )
+
+            for person_detection in (
+                frame_detections.person_detections
+            ):
+                person_detection.track_id = None
+
+            pose_detection_cache[
+                absolute_frame_idx
+            ] = frame_detections
+
+    missing_frame_indices = sorted(
+        set(required_frame_indices)
+        - pose_detection_cache.keys()
+    )
+
+    if missing_frame_indices:
+        raise RuntimeError(
+            "Pose detection cache is missing required frame "
+            f"indices: {missing_frame_indices}"
+        )
+
+    return pose_detection_cache
+
 
 
 def collect_cached_tracked_clip_detections(
