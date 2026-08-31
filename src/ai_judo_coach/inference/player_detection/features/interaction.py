@@ -158,41 +158,51 @@ def average_nearest_keypoint_distance(
     ):
         return None
 
-    detection_a_kp_min_distance_sum = 0.0
-    for keypoint in detection_a_visible_keypoints:
-        distances_to_other_detection_kps = []
-
-        for other_pose_keypoint in detection_b_visible_keypoints:
-            distances_to_other_detection_kps.append(
-                math.dist(keypoint, other_pose_keypoint)
-            )
-
-        detection_a_kp_min_distance_sum += min(distances_to_other_detection_kps)
-
-    detection_b_kp_min_distance_sum = 0.0
-    for keypoint in detection_b_visible_keypoints:
-        distances_to_other_detection_kps = []
-
-        for other_pose_keypoint in detection_a_visible_keypoints:
-            distances_to_other_detection_kps.append(
-                math.dist(keypoint, other_pose_keypoint)
-            )
-
-        detection_b_kp_min_distance_sum += min(distances_to_other_detection_kps)
-
-    detection_a_avg_kp_distance = (
-        detection_a_kp_min_distance_sum
-        / len(detection_a_visible_keypoints)
+    detection_a_visible_keypoints = (
+        detection_a_visible_keypoints.astype(
+            np.float64,
+            copy=False,
+        )
+    )
+    detection_b_visible_keypoints = (
+        detection_b_visible_keypoints.astype(
+            np.float64,
+            copy=False,
+        )
     )
 
-    detection_b_avg_kp_distance = (
-        detection_b_kp_min_distance_sum
-        / len(detection_b_visible_keypoints)
+    keypoint_differences = (
+        detection_a_visible_keypoints[:, np.newaxis, :]
+        - detection_b_visible_keypoints[np.newaxis, :, :]
     )
-    
+
+    pairwise_keypoint_distances = np.linalg.norm(
+        keypoint_differences,
+        axis=2,
+    )
+
+    detection_a_avg_kp_distance = float(
+        np.min(
+            pairwise_keypoint_distances,
+            axis=1,
+        ).mean()
+    )
+
+    detection_b_avg_kp_distance = float(
+        np.min(
+            pairwise_keypoint_distances,
+            axis=0,
+        ).mean()
+    )
+
     return float(
-        (detection_a_avg_kp_distance + detection_b_avg_kp_distance) / 2
+        (
+            detection_a_avg_kp_distance
+            + detection_b_avg_kp_distance
+        )
+        / 2
     )
+
 
 
 

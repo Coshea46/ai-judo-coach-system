@@ -602,3 +602,64 @@ def test_transition_score_propagates_invalid_current_detection_index(
         )
 
     distance_mock.assert_not_called()
+
+
+def test_transition_score_reuses_cached_single_player_scores(
+    mocker,
+) -> None:
+    previous_frame = _create_frame_detections(
+        track_ids=[10],
+        frame_idx=0,
+    )
+    current_frame = _create_frame_detections(
+        track_ids=[10],
+        frame_idx=1,
+    )
+
+    distance_mock = mocker.patch(
+        f"{TRANSITION_SCORE_MODULE_PATH}."
+        "normalized_distance_between_bbox_centers",
+        return_value=0.0,
+    )
+
+    config = PlayerDetectionConfig(
+        same_track_id_bonus=0.4,
+        bbox_center_distance_penalty_weight=0.5,
+    )
+    score_cache: dict[
+        tuple[int, int],
+        float,
+    ] = {}
+
+    first_result = transition_score(
+        previous_state=(0, -1),
+        current_state=(0, -1),
+        previous_frame_detections=previous_frame,
+        current_frame_detections=current_frame,
+        config=config,
+        single_player_score_cache=score_cache,
+    )
+    second_result = transition_score(
+        previous_state=(0, -1),
+        current_state=(0, -1),
+        previous_frame_detections=previous_frame,
+        current_frame_detections=current_frame,
+        config=config,
+        single_player_score_cache=score_cache,
+    )
+
+    assert first_result == pytest.approx(0.4)
+    assert second_result == pytest.approx(0.4)
+
+    distance_mock.assert_called_once()
+
+    assert score_cache.keys() == {
+        (0, 0),
+        (-1, -1),
+    }
+    assert score_cache[(0, 0)] == pytest.approx(
+        0.4
+    )
+    assert score_cache[(-1, -1)] == pytest.approx(
+        0.0
+    )

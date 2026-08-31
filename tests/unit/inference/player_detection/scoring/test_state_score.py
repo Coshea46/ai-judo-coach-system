@@ -443,3 +443,106 @@ def test_state_score_propagates_invalid_detection_index(
 
     detection_score_mock.assert_not_called()
     pair_score_mock.assert_not_called()
+
+
+def test_state_score_reuses_detection_and_symmetric_pair_scores(
+    mocker,
+) -> None:
+    frame_detections = (
+        _create_frame_detections(
+            detection_count=2,
+        )
+    )
+
+    detection_a = (
+        frame_detections.person_detections[0]
+    )
+    detection_b = (
+        frame_detections.person_detections[1]
+    )
+
+    detection_score_mock = mocker.patch(
+        f"{STATE_SCORE_MODULE_PATH}."
+        "detection_score",
+        side_effect=[
+            0.6,
+            0.7,
+        ],
+    )
+    pair_score_mock = mocker.patch(
+        f"{STATE_SCORE_MODULE_PATH}."
+        "pair_score",
+        return_value=0.8,
+    )
+
+    config = PlayerDetectionConfig()
+
+    detection_score_cache: dict[
+        int,
+        float,
+    ] = {}
+    pair_score_cache: dict[
+        tuple[int, int],
+        float,
+    ] = {}
+
+    first_result = state_score(
+        state=(0, 1),
+        frame_detections=frame_detections,
+        config=config,
+        detection_score_cache=(
+            detection_score_cache
+        ),
+        pair_score_cache=pair_score_cache,
+    )
+    second_result = state_score(
+        state=(1, 0),
+        frame_detections=frame_detections,
+        config=config,
+        detection_score_cache=(
+            detection_score_cache
+        ),
+        pair_score_cache=pair_score_cache,
+    )
+
+    assert first_result == pytest.approx(
+        0.6 + 0.7 + 0.8
+    )
+    assert second_result == pytest.approx(
+        0.6 + 0.7 + 0.8
+    )
+
+    assert detection_score_mock.call_args_list == [
+        call(
+            person_detection=detection_a,
+            config=config,
+        ),
+        call(
+            person_detection=detection_b,
+            config=config,
+        ),
+    ]
+
+    pair_score_mock.assert_called_once_with(
+        person_detection_a=detection_a,
+        person_detection_b=detection_b,
+        config=config,
+    )
+
+    assert detection_score_cache.keys() == {
+        0,
+        1,
+    }
+    assert detection_score_cache[0] == pytest.approx(
+        0.6
+    )
+    assert detection_score_cache[1] == pytest.approx(
+        0.7
+    )
+
+    assert pair_score_cache.keys() == {
+        (0, 1),
+    }
+    assert pair_score_cache[(0, 1)] == pytest.approx(
+        0.8
+    )

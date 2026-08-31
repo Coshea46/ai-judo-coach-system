@@ -7,8 +7,8 @@ from ai_judo_coach.exceptions.video import InvalidVideoError
 
 
 def compute_initial_clip_windows(
-    input_video_path: str, 
-    individual_window_duration: float, 
+    input_video_path: str,
+    individual_window_duration: float,
     stride: float
 ) -> Iterator[InitialClipWindow]:
     """
@@ -40,6 +40,8 @@ def compute_initial_clip_windows(
     # keeping id's simple here so clips can be recombined easily later in pipeline
     video_playhead = 0.0  # tracks how far through the video the generator is
     window_idx = 0
+    last_window_end = 0.0
+
     while video_playhead + individual_window_duration <= input_video_duration:
 
         clip_window = InitialClipWindow(
@@ -48,13 +50,16 @@ def compute_initial_clip_windows(
             window_id=window_idx,
         )
 
+        last_window_end = clip_window.end_time
+
         yield clip_window
 
         video_playhead += stride
         window_idx += 1
 
-    # create one last window if uncovered interval at end of input video
-    if (input_video_duration - video_playhead) > 0:
+    # create one last window if the previous window did not reach the
+    # end of the input video
+    if last_window_end < input_video_duration:
 
         clip_window = InitialClipWindow(
             start_time=input_video_duration - individual_window_duration,

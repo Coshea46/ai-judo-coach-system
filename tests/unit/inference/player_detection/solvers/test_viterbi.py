@@ -1,5 +1,6 @@
-from unittest.mock import call
+from unittest.mock import ANY, call
 
+import numpy as np
 import pytest
 
 from ai_judo_coach.inference.inference_schemas import (
@@ -59,8 +60,9 @@ def test_viterbi_algorithm_rejects_frame_count_mismatch(
     state_score_mock = mocker.patch(
         f"{VITERBI_MODULE_PATH}.state_score"
     )
-    transition_score_mock = mocker.patch(
-        f"{VITERBI_MODULE_PATH}.transition_score"
+    transition_matrix_mock = mocker.patch(
+        f"{VITERBI_MODULE_PATH}."
+        "build_transition_score_matrix"
     )
 
     with pytest.raises(
@@ -81,7 +83,7 @@ def test_viterbi_algorithm_rejects_frame_count_mismatch(
         )
 
     state_score_mock.assert_not_called()
-    transition_score_mock.assert_not_called()
+    transition_matrix_mock.assert_not_called()
 
 
 def test_viterbi_algorithm_rejects_first_frame_without_candidate_states(
@@ -90,8 +92,9 @@ def test_viterbi_algorithm_rejects_first_frame_without_candidate_states(
     state_score_mock = mocker.patch(
         f"{VITERBI_MODULE_PATH}.state_score"
     )
-    transition_score_mock = mocker.patch(
-        f"{VITERBI_MODULE_PATH}.transition_score"
+    transition_matrix_mock = mocker.patch(
+        f"{VITERBI_MODULE_PATH}."
+        "build_transition_score_matrix"
     )
 
     with pytest.raises(
@@ -109,7 +112,7 @@ def test_viterbi_algorithm_rejects_first_frame_without_candidate_states(
         )
 
     state_score_mock.assert_not_called()
-    transition_score_mock.assert_not_called()
+    transition_matrix_mock.assert_not_called()
 
 
 def test_viterbi_algorithm_rejects_later_frame_without_candidate_states(
@@ -121,8 +124,9 @@ def test_viterbi_algorithm_rejects_later_frame_without_candidate_states(
         f"{VITERBI_MODULE_PATH}.state_score",
         return_value=0.5,
     )
-    transition_score_mock = mocker.patch(
-        f"{VITERBI_MODULE_PATH}.transition_score"
+    transition_matrix_mock = mocker.patch(
+        f"{VITERBI_MODULE_PATH}."
+        "build_transition_score_matrix"
     )
 
     config = PlayerDetectionConfig()
@@ -149,8 +153,10 @@ def test_viterbi_algorithm_rejects_later_frame_without_candidate_states(
             clip_detections.frame_detections[0]
         ),
         config=config,
+        detection_score_cache=ANY,
+        pair_score_cache=ANY,
     )
-    transition_score_mock.assert_not_called()
+    transition_matrix_mock.assert_not_called()
 
 
 def test_viterbi_algorithm_selects_highest_scoring_state_for_single_frame(
@@ -178,17 +184,29 @@ def test_viterbi_algorithm_selects_highest_scoring_state_for_single_frame(
         state: CandidateState,
         frame_detections: FrameDetections,
         config: PlayerDetectionConfig,
+        detection_score_cache: dict[
+            int,
+            float,
+        ],
+        pair_score_cache: dict[
+            tuple[int, int],
+            float,
+        ],
     ) -> float:
         del frame_detections
         del config
+        del detection_score_cache
+        del pair_score_cache
+
         return state_scores[state]
 
     state_score_mock = mocker.patch(
         f"{VITERBI_MODULE_PATH}.state_score",
         side_effect=state_score_side_effect,
     )
-    transition_score_mock = mocker.patch(
-        f"{VITERBI_MODULE_PATH}.transition_score"
+    transition_matrix_mock = mocker.patch(
+        f"{VITERBI_MODULE_PATH}."
+        "build_transition_score_matrix"
     )
 
     config = PlayerDetectionConfig()
@@ -214,20 +232,26 @@ def test_viterbi_algorithm_selects_highest_scoring_state_for_single_frame(
             state=first_state,
             frame_detections=frame_detections,
             config=config,
+            detection_score_cache=ANY,
+            pair_score_cache=ANY,
         ),
         call(
             state=second_state,
             frame_detections=frame_detections,
             config=config,
+            detection_score_cache=ANY,
+            pair_score_cache=ANY,
         ),
         call(
             state=third_state,
             frame_detections=frame_detections,
             config=config,
+            detection_score_cache=ANY,
+            pair_score_cache=ANY,
         ),
     ]
 
-    transition_score_mock.assert_not_called()
+    transition_matrix_mock.assert_not_called()
 
 
 def test_viterbi_algorithm_selects_best_complete_path(
@@ -267,25 +291,6 @@ def test_viterbi_algorithm_selects_best_complete_path(
         (1, frame_1_state_d): 2.0,
     }
 
-    transition_scores = {
-        (
-            frame_0_state_a,
-            frame_1_state_c,
-        ): 0.0,
-        (
-            frame_0_state_b,
-            frame_1_state_c,
-        ): 10.0,
-        (
-            frame_0_state_a,
-            frame_1_state_d,
-        ): 0.0,
-        (
-            frame_0_state_b,
-            frame_1_state_d,
-        ): 0.0,
-    }
-
     expected_config = PlayerDetectionConfig()
 
     def state_score_side_effect(
@@ -293,8 +298,24 @@ def test_viterbi_algorithm_selects_best_complete_path(
         state: CandidateState,
         frame_detections: FrameDetections,
         config: PlayerDetectionConfig,
+        detection_score_cache: dict[
+            int,
+            float,
+        ],
+        pair_score_cache: dict[
+            tuple[int, int],
+            float,
+        ],
     ) -> float:
         assert config is expected_config
+        assert isinstance(
+            detection_score_cache,
+            dict,
+        )
+        assert isinstance(
+            pair_score_cache,
+            dict,
+        )
 
         return state_scores[
             (
@@ -303,32 +324,27 @@ def test_viterbi_algorithm_selects_best_complete_path(
             )
         ]
 
-    def transition_score_side_effect(
-        *,
-        previous_state: CandidateState,
-        current_state: CandidateState,
-        previous_frame_detections: FrameDetections,
-        current_frame_detections: FrameDetections,
-        config: PlayerDetectionConfig,
-    ) -> float:
-        assert previous_frame_detections is previous_frame
-        assert current_frame_detections is current_frame
-        assert config is expected_config
-
-        return transition_scores[
-            (
-                previous_state,
-                current_state,
-            )
-        ]
-
     state_score_mock = mocker.patch(
         f"{VITERBI_MODULE_PATH}.state_score",
         side_effect=state_score_side_effect,
     )
-    transition_score_mock = mocker.patch(
-        f"{VITERBI_MODULE_PATH}.transition_score",
-        side_effect=transition_score_side_effect,
+
+    transition_matrix_mock = mocker.patch(
+        f"{VITERBI_MODULE_PATH}."
+        "build_transition_score_matrix",
+        return_value=np.asarray(
+            [
+                [
+                    0.0,
+                    0.0,
+                ],
+                [
+                    10.0,
+                    0.0,
+                ],
+            ],
+            dtype=np.float64,
+        ),
     )
 
     result = viterbi_algorithm(
@@ -352,54 +368,45 @@ def test_viterbi_algorithm_selects_best_complete_path(
             state=frame_0_state_a,
             frame_detections=previous_frame,
             config=expected_config,
+            detection_score_cache=ANY,
+            pair_score_cache=ANY,
         ),
         call(
             state=frame_0_state_b,
             frame_detections=previous_frame,
             config=expected_config,
+            detection_score_cache=ANY,
+            pair_score_cache=ANY,
         ),
         call(
             state=frame_1_state_c,
             frame_detections=current_frame,
             config=expected_config,
+            detection_score_cache=ANY,
+            pair_score_cache=ANY,
         ),
         call(
             state=frame_1_state_d,
             frame_detections=current_frame,
             config=expected_config,
+            detection_score_cache=ANY,
+            pair_score_cache=ANY,
         ),
     ]
 
-    assert transition_score_mock.call_args_list == [
-        call(
-            previous_state=frame_0_state_a,
-            current_state=frame_1_state_c,
-            previous_frame_detections=previous_frame,
-            current_frame_detections=current_frame,
-            config=expected_config,
-        ),
-        call(
-            previous_state=frame_0_state_b,
-            current_state=frame_1_state_c,
-            previous_frame_detections=previous_frame,
-            current_frame_detections=current_frame,
-            config=expected_config,
-        ),
-        call(
-            previous_state=frame_0_state_a,
-            current_state=frame_1_state_d,
-            previous_frame_detections=previous_frame,
-            current_frame_detections=current_frame,
-            config=expected_config,
-        ),
-        call(
-            previous_state=frame_0_state_b,
-            current_state=frame_1_state_d,
-            previous_frame_detections=previous_frame,
-            current_frame_detections=current_frame,
-            config=expected_config,
-        ),
-    ]
+    transition_matrix_mock.assert_called_once_with(
+        previous_states=[
+            frame_0_state_a,
+            frame_0_state_b,
+        ],
+        current_states=[
+            frame_1_state_c,
+            frame_1_state_d,
+        ],
+        previous_frame_detections=previous_frame,
+        current_frame_detections=current_frame,
+        config=expected_config,
+    )
 
 
 def test_viterbi_algorithm_backtracks_across_multiple_frames(
@@ -427,24 +434,52 @@ def test_viterbi_algorithm_backtracks_across_multiple_frames(
         (2, state_b): 0.0,
     }
 
-    transition_scores = {
-        (0, state_a, state_a): 0.0,
-        (0, state_b, state_a): 0.0,
-        (0, state_a, state_b): 2.0,
-        (0, state_b, state_b): 0.0,
-        (1, state_a, state_a): 0.0,
-        (1, state_b, state_a): 3.0,
-        (1, state_a, state_b): 0.0,
-        (1, state_b, state_b): 0.0,
-    }
+    transition_matrices = [
+        np.asarray(
+            [
+                [
+                    0.0,
+                    2.0,
+                ],
+                [
+                    0.0,
+                    0.0,
+                ],
+            ],
+            dtype=np.float64,
+        ),
+        np.asarray(
+            [
+                [
+                    0.0,
+                    0.0,
+                ],
+                [
+                    3.0,
+                    0.0,
+                ],
+            ],
+            dtype=np.float64,
+        ),
+    ]
 
     def state_score_side_effect(
         *,
         state: CandidateState,
         frame_detections: FrameDetections,
         config: PlayerDetectionConfig,
+        detection_score_cache: dict[
+            int,
+            float,
+        ],
+        pair_score_cache: dict[
+            tuple[int, int],
+            float,
+        ],
     ) -> float:
         del config
+        del detection_score_cache
+        del pair_score_cache
 
         return state_scores[
             (
@@ -453,32 +488,14 @@ def test_viterbi_algorithm_backtracks_across_multiple_frames(
             )
         ]
 
-    def transition_score_side_effect(
-        *,
-        previous_state: CandidateState,
-        current_state: CandidateState,
-        previous_frame_detections: FrameDetections,
-        current_frame_detections: FrameDetections,
-        config: PlayerDetectionConfig,
-    ) -> float:
-        del current_frame_detections
-        del config
-
-        return transition_scores[
-            (
-                previous_frame_detections.frame_idx,
-                previous_state,
-                current_state,
-            )
-        ]
-
     mocker.patch(
         f"{VITERBI_MODULE_PATH}.state_score",
         side_effect=state_score_side_effect,
     )
-    mocker.patch(
-        f"{VITERBI_MODULE_PATH}.transition_score",
-        side_effect=transition_score_side_effect,
+    transition_matrix_mock = mocker.patch(
+        f"{VITERBI_MODULE_PATH}."
+        "build_transition_score_matrix",
+        side_effect=transition_matrices,
     )
 
     result = viterbi_algorithm(
@@ -495,6 +512,8 @@ def test_viterbi_algorithm_backtracks_across_multiple_frames(
         state_a,
     ]
 
+    assert transition_matrix_mock.call_count == 2
+
 
 def test_viterbi_algorithm_uses_first_state_when_final_scores_are_tied(
     mocker,
@@ -506,8 +525,9 @@ def test_viterbi_algorithm_uses_first_state_when_final_scores_are_tied(
         f"{VITERBI_MODULE_PATH}.state_score",
         return_value=1.0,
     )
-    transition_score_mock = mocker.patch(
-        f"{VITERBI_MODULE_PATH}.transition_score"
+    transition_matrix_mock = mocker.patch(
+        f"{VITERBI_MODULE_PATH}."
+        "build_transition_score_matrix"
     )
 
     result = viterbi_algorithm(
@@ -526,7 +546,7 @@ def test_viterbi_algorithm_uses_first_state_when_final_scores_are_tied(
     assert result == [
         first_state,
     ]
-    transition_score_mock.assert_not_called()
+    transition_matrix_mock.assert_not_called()
 
 
 def test_viterbi_algorithm_uses_first_predecessor_when_path_scores_are_tied(
@@ -545,8 +565,15 @@ def test_viterbi_algorithm_uses_first_predecessor_when_path_scores_are_tied(
         return_value=0.0,
     )
     mocker.patch(
-        f"{VITERBI_MODULE_PATH}.transition_score",
-        return_value=0.0,
+        f"{VITERBI_MODULE_PATH}."
+        "build_transition_score_matrix",
+        return_value=np.zeros(
+            (
+                2,
+                1,
+            ),
+            dtype=np.float64,
+        ),
     )
 
     result = viterbi_algorithm(
@@ -580,9 +607,19 @@ def test_viterbi_algorithm_raises_when_no_finite_predecessor_can_be_selected(
         state: CandidateState,
         frame_detections: FrameDetections,
         config: PlayerDetectionConfig,
+        detection_score_cache: dict[
+            int,
+            float,
+        ],
+        pair_score_cache: dict[
+            tuple[int, int],
+            float,
+        ],
     ) -> float:
         del state
         del config
+        del detection_score_cache
+        del pair_score_cache
 
         if frame_detections.frame_idx == 0:
             return -float("inf")
@@ -594,8 +631,15 @@ def test_viterbi_algorithm_raises_when_no_finite_predecessor_can_be_selected(
         side_effect=state_score_side_effect,
     )
     mocker.patch(
-        f"{VITERBI_MODULE_PATH}.transition_score",
-        return_value=0.0,
+        f"{VITERBI_MODULE_PATH}."
+        "build_transition_score_matrix",
+        return_value=np.zeros(
+            (
+                1,
+                1,
+            ),
+            dtype=np.float64,
+        ),
     )
 
     with pytest.raises(
@@ -632,8 +676,9 @@ def test_viterbi_algorithm_propagates_state_score_failure(
         f"{VITERBI_MODULE_PATH}.state_score",
         side_effect=scoring_error,
     )
-    transition_score_mock = mocker.patch(
-        f"{VITERBI_MODULE_PATH}.transition_score"
+    transition_matrix_mock = mocker.patch(
+        f"{VITERBI_MODULE_PATH}."
+        "build_transition_score_matrix"
     )
 
     config = PlayerDetectionConfig()
@@ -657,10 +702,10 @@ def test_viterbi_algorithm_propagates_state_score_failure(
 
     assert exception_info.value is scoring_error
     state_score_mock.assert_called_once()
-    transition_score_mock.assert_not_called()
+    transition_matrix_mock.assert_not_called()
 
 
-def test_viterbi_algorithm_propagates_transition_score_failure(
+def test_viterbi_algorithm_propagates_transition_matrix_failure(
     mocker,
 ) -> None:
     transition_error = RuntimeError(
@@ -671,8 +716,9 @@ def test_viterbi_algorithm_propagates_transition_score_failure(
         f"{VITERBI_MODULE_PATH}.state_score",
         return_value=0.5,
     )
-    transition_score_mock = mocker.patch(
-        f"{VITERBI_MODULE_PATH}.transition_score",
+    transition_matrix_mock = mocker.patch(
+        f"{VITERBI_MODULE_PATH}."
+        "build_transition_score_matrix",
         side_effect=transition_error,
     )
 
@@ -697,4 +743,4 @@ def test_viterbi_algorithm_propagates_transition_score_failure(
 
     assert exception_info.value is transition_error
     assert state_score_mock.call_count == 2
-    transition_score_mock.assert_called_once()
+    transition_matrix_mock.assert_called_once()

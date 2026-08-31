@@ -85,3 +85,26 @@ def test_invalid_video_raises(mocker):
                 7.0,
             )
         )
+
+
+
+def test_video_equal_to_window_duration_is_not_duplicated(
+    mocker,
+) -> None:
+    mocker.patch(
+        FFPROBE_PATCH_PATH,
+        return_value={"format": {"duration": "7.0"}},
+    )
+
+    windows = list(
+        compute_initial_clip_windows(
+            "fake.mp4",
+            7.0,
+            3.0,
+        )
+    )
+
+    assert len(windows) == 1
+    assert windows[0].start_time == 0.0
+    assert windows[0].end_time == 7.0
+    assert windows[0].window_id == 0

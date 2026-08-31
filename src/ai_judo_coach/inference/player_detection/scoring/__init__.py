@@ -2,10 +2,14 @@ from .detection_score import detection_score
 from .missing_score import missing_state_penalty
 from .pair_score import pair_score
 from .state_score import state_score
-from .transition_score import transition_score
+from .transition_score import (
+    build_transition_score_matrix,
+    transition_score,
+)
 
 
 __all__ = [
+    "build_transition_score_matrix",
     "detection_score",
     "missing_state_penalty",
     "pair_score",

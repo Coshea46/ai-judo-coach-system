@@ -1,12 +1,20 @@
 import math
 
+import numpy as np
+
 from ai_judo_coach.inference.player_detection.scoring import (
+    build_transition_score_matrix,
     state_score,
-    transition_score,
 )
-from ai_judo_coach.inference.player_detection.candidate_states import CandidateState
-from ai_judo_coach.inference.inference_schemas import ClipDetections
-from ai_judo_coach.inference.player_detection.tracking_config import PlayerDetectionConfig
+from ai_judo_coach.inference.player_detection.candidate_states import (
+    CandidateState,
+)
+from ai_judo_coach.inference.inference_schemas import (
+    ClipDetections,
+)
+from ai_judo_coach.inference.player_detection.tracking_config import (
+    PlayerDetectionConfig,
+)
 
 
 # currently using uniform additive prior
@@ -52,25 +60,58 @@ def viterbi_algorithm(
                 f"Frame {frame_idx} has no candidate states."
             )
 
-        frame_mlp_table_row: dict[CandidateState, float] = {}
+        frame_mlp_table_row: dict[
+            CandidateState,
+            float,
+        ] = {}
         frame_predecessor_table_row: dict[
             CandidateState,
-            CandidateState | None
+            CandidateState | None,
         ] = {}
 
         current_frame_detections = (
             clip_detections.frame_detections[frame_idx]
         )
 
-        for candidate_state in frame_candidate_states:
-            current_state_score = state_score(
-                state=candidate_state,
-                frame_detections=current_frame_detections,
-                config=config,
-            )
+        detection_score_cache: dict[
+            int,
+            float,
+        ] = {}
 
-            if frame_idx == 0:
-                frame_mlp_table_row[candidate_state] = (
+        pair_score_cache: dict[
+            tuple[int, int],
+            float,
+        ] = {}
+
+        current_state_scores = np.asarray(
+            [
+                state_score(
+                    state=candidate_state,
+                    frame_detections=(
+                        current_frame_detections
+                    ),
+                    config=config,
+                    detection_score_cache=(
+                        detection_score_cache
+                    ),
+                    pair_score_cache=pair_score_cache,
+                )
+                for candidate_state
+                in frame_candidate_states
+            ],
+            dtype=np.float64,
+        )
+
+        if frame_idx == 0:
+            for (
+                candidate_state,
+                current_state_score,
+            ) in zip(
+                frame_candidate_states,
+                current_state_scores,
+                strict=True,
+            ):
+                frame_mlp_table_row[candidate_state] = float(
                     VITERBI_PRIOR_SCORE
                     + current_state_score
                 )
@@ -78,68 +119,136 @@ def viterbi_algorithm(
                 # predecessor should be None for entire 0th row in table
                 frame_predecessor_table_row[candidate_state] = None
 
-            else:
-                previous_frame_detections = (
-                    clip_detections.frame_detections[frame_idx - 1]
+        else:
+            previous_frame_detections = (
+                clip_detections.frame_detections[
+                    frame_idx - 1
+                ]
+            )
+
+            previous_states = list(
+                mlp_table[frame_idx - 1]
+            )
+            previous_mlp_values = np.asarray(
+                [
+                    mlp_table[frame_idx - 1][state]
+                    for state in previous_states
+                ],
+                dtype=np.float64,
+            )
+
+            transition_score_matrix = (
+                build_transition_score_matrix(
+                    previous_states=previous_states,
+                    current_states=(
+                        frame_candidate_states
+                    ),
+                    previous_frame_detections=(
+                        previous_frame_detections
+                    ),
+                    current_frame_detections=(
+                        current_frame_detections
+                    ),
+                    config=config,
+                )
+            )
+
+            candidate_mlp_values = (
+                previous_mlp_values[:, np.newaxis]
+                + transition_score_matrix
+                + current_state_scores[np.newaxis, :]
+            )
+
+            selectable_predecessors = (
+                candidate_mlp_values
+                > -math.inf
+            )
+            has_selectable_predecessor = np.any(
+                selectable_predecessors,
+                axis=0,
+            )
+
+            if not np.all(
+                has_selectable_predecessor
+            ):
+                invalid_state_index = int(
+                    np.flatnonzero(
+                        ~has_selectable_predecessor
+                    )[0]
+                )
+                invalid_state = frame_candidate_states[
+                    invalid_state_index
+                ]
+
+                raise RuntimeError(
+                    "Could not find a predecessor for "
+                    f"state {invalid_state} in frame "
+                    f"{frame_idx}."
                 )
 
-                current_best_mlp_value = -math.inf
-                current_best_predecessor: CandidateState | None = None
+            selectable_mlp_values = np.where(
+                selectable_predecessors,
+                candidate_mlp_values,
+                -math.inf,
+            )
 
-                # loop through predecessor state mlp values
-                for (
-                    predecessor_state,
-                    predecessor_mlp_value,
-                ) in mlp_table[frame_idx - 1].items():
-                    candidate_mlp_value = (
-                        predecessor_mlp_value
-                        + transition_score(
-                            previous_state=predecessor_state,
-                            current_state=candidate_state,
-                            previous_frame_detections=(
-                                previous_frame_detections
-                            ),
-                            current_frame_detections=(
-                                current_frame_detections
-                            ),
-                            config=config,
-                        )
-                        + current_state_score
-                    )
+            best_predecessor_indices = np.argmax(
+                selectable_mlp_values,
+                axis=0,
+            )
 
-                    if candidate_mlp_value > current_best_mlp_value:
-                        current_best_mlp_value = candidate_mlp_value
-                        current_best_predecessor = predecessor_state
+            for (
+                current_state_index,
+                candidate_state,
+            ) in enumerate(
+                frame_candidate_states
+            ):
+                best_predecessor_index = int(
+                    best_predecessor_indices[
+                        current_state_index
+                    ]
+                )
 
-                if current_best_predecessor is None:
-                    raise RuntimeError(
-                        "Could not find a predecessor for "
-                        f"state {candidate_state} in frame {frame_idx}."
-                    )
-
-                frame_mlp_table_row[candidate_state] = (
-                    current_best_mlp_value
+                frame_mlp_table_row[candidate_state] = float(
+                    candidate_mlp_values[
+                        best_predecessor_index,
+                        current_state_index,
+                    ]
                 )
 
                 frame_predecessor_table_row[candidate_state] = (
-                    current_best_predecessor
+                    previous_states[
+                        best_predecessor_index
+                    ]
                 )
 
         mlp_table.append(frame_mlp_table_row)
-        predecessor_table.append(frame_predecessor_table_row)
+        predecessor_table.append(
+            frame_predecessor_table_row
+        )
 
     # find the highest-scoring state in the final frame
     mlp_end_state = max(
         mlp_table[num_frames - 1],
-        key=lambda state: mlp_table[num_frames - 1][state],
+        key=lambda state: (
+            mlp_table[num_frames - 1][state]
+        ),
     )
 
     # walk backwards through the predecessor table
-    output_path: list[CandidateState] = [mlp_end_state]
+    output_path: list[CandidateState] = [
+        mlp_end_state
+    ]
     current_state = mlp_end_state
 
-    for frame_idx in range(num_frames - 1, 0, -1):
-        predecessor_state = predecessor_table[frame_idx][current_state]
+    for frame_idx in range(
+        num_frames - 1,
+        0,
+        -1,
+    ):
+        predecessor_state = (
+            predecessor_table[frame_idx][current_state]
+        )
 
         if predecessor_state is None:
             raise RuntimeError(
