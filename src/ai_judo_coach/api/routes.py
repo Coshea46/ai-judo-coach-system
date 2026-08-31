@@ -8,15 +8,15 @@ from fastapi import(
     Depends,
     HTTPException
 )
+from fastapi.responses import RedirectResponse
 
 from ai_judo_coach.storage import(
     check_input_video_exists,
     copy_example_video_to_job_input,
+    create_presigned_example_video_preview_url,
     create_presigned_generated_clip_download_url,
     create_presigned_upload_post
 )
-
-
 from ai_judo_coach.api.dependencies import (
     get_bucket_name,
     get_job_store,
@@ -326,6 +326,53 @@ def read_job_status(
         "clips": downloadable_clips,
         "error": None,
     }
+
+
+
+
+@router.get(
+    "/examples/{example}/preview",
+    response_class=RedirectResponse,
+    status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+)
+def preview_example_video(
+    example: Literal[
+        "full",
+        "short",
+    ],
+    s3_client: Annotated[
+        Any,
+        Depends(get_s3_client),
+    ],
+    bucket_name: Annotated[
+        str,
+        Depends(get_bucket_name),
+    ],
+) -> RedirectResponse:
+    """
+    Redirect the browser to a temporary URL for an example video.
+    """
+
+    preview_url = (
+        create_presigned_example_video_preview_url(
+            s3_client=s3_client,
+            bucket_name=bucket_name,
+            example=example,
+        )
+    )
+
+    return RedirectResponse(
+        url=preview_url,
+        status_code=(
+            status.HTTP_307_TEMPORARY_REDIRECT
+        ),
+        headers={
+            # Do not cache a redirect containing an expiring signature.
+            "Cache-Control": "no-store",
+        },
+    )
+
+
 
 
 
