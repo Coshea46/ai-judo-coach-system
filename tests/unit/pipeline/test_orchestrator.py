@@ -1,7 +1,6 @@
 from pathlib import Path
 from unittest.mock import call
 
-import numpy as np
 import pytest
 
 import ai_judo_coach.pipeline.orchestrator as orchestrator
@@ -47,28 +46,6 @@ def test_run_pipeline_processes_windows_and_extracts_positive_intervals(
         ),
     ]
 
-    clip_frames = [
-        [
-            np.zeros(
-                (32, 32, 3),
-                dtype=np.uint8,
-            ),
-        ],
-        [
-            np.ones(
-                (32, 32, 3),
-                dtype=np.uint8,
-            ),
-        ],
-        [
-            np.full(
-                (32, 32, 3),
-                2,
-                dtype=np.uint8,
-            ),
-        ],
-    ]
-
     clip_processing_results = [
         ClipProcessingResult(
             clip_id="0",
@@ -112,6 +89,7 @@ def test_run_pipeline_processes_windows_and_extracts_positive_intervals(
 
     yolo_model = mocker.Mock()
     classifier_model = mocker.Mock()
+    pose_detection_cache = {}
 
     cleanse_mock = mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
@@ -125,6 +103,15 @@ def test_run_pipeline_processes_windows_and_extracts_positive_intervals(
         f"{ORCHESTRATOR_MODULE_PATH}."
         "compute_initial_clip_windows",
         return_value=iter(clip_windows),
+    )
+    compute_frame_indices_mock = mocker.patch(
+        f"{ORCHESTRATOR_MODULE_PATH}."
+        "compute_initial_window_frame_indices",
+        side_effect=[
+            [0],
+            [90],
+            [180],
+        ],
     )
     resolve_device_mock = mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
@@ -141,10 +128,10 @@ def test_run_pipeline_processes_windows_and_extracts_positive_intervals(
         "construct_classifier",
         return_value=classifier_model,
     )
-    extract_frames_mock = mocker.patch(
+    collect_pose_cache_mock = mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
-        "extract_frames_from_initial_window",
-        side_effect=clip_frames,
+        "collect_pose_detection_cache_from_video",
+        return_value=pose_detection_cache,
     )
     process_clip_mock = mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
@@ -187,6 +174,27 @@ def test_run_pipeline_processes_windows_and_extracts_positive_intervals(
         ),
     )
 
+    assert compute_frame_indices_mock.call_args_list == [
+        call(
+            window=clip_windows[0],
+            video_fps=float(
+                orchestrator.TARGET_FPS
+            ),
+        ),
+        call(
+            window=clip_windows[1],
+            video_fps=float(
+                orchestrator.TARGET_FPS
+            ),
+        ),
+        call(
+            window=clip_windows[2],
+            video_fps=float(
+                orchestrator.TARGET_FPS
+            ),
+        ),
+    ]
+
     resolve_device_mock.assert_called_once_with(
         requested_device=orchestrator.YOLO_DEVICE,
     )
@@ -206,44 +214,31 @@ def test_run_pipeline_processes_windows_and_extracts_positive_intervals(
         ),
     )
 
-    assert extract_frames_mock.call_args_list == [
-        call(
-            source_video_path=cleansed_video_path,
-            window=clip_windows[0],
-            video_fps=float(
-                orchestrator.TARGET_FPS
-            ),
-            device=orchestrator.DECORD_TARGET_DEVICE,
-        ),
-        call(
-            source_video_path=cleansed_video_path,
-            window=clip_windows[1],
-            video_fps=float(
-                orchestrator.TARGET_FPS
-            ),
-            device=orchestrator.DECORD_TARGET_DEVICE,
-        ),
-        call(
-            source_video_path=cleansed_video_path,
-            window=clip_windows[2],
-            video_fps=float(
-                orchestrator.TARGET_FPS
-            ),
-            device=orchestrator.DECORD_TARGET_DEVICE,
-        ),
-    ]
+    collect_pose_cache_mock.assert_called_once_with(
+        yolo_model=yolo_model,
+        source_video_path=cleansed_video_path,
+        required_frame_indices=[
+            0,
+            90,
+            180,
+        ],
+        compute_device="cuda:0",
+    )
 
     assert process_clip_mock.call_count == 3
+
+    expected_absolute_frame_indices = [
+        [0],
+        [90],
+        [180],
+    ]
 
     for clip_index, process_call in enumerate(
         process_clip_mock.call_args_list
     ):
         call_arguments = process_call.kwargs
 
-        assert (
-            call_arguments["clip_as_numpy"]
-            is clip_frames[clip_index]
-        )
+        assert call_arguments["clip_as_numpy"] == []
         assert call_arguments["clip_id"] == str(
             clip_windows[clip_index].window_id
         )
@@ -262,6 +257,18 @@ def test_run_pipeline_processes_windows_and_extracts_positive_intervals(
         assert (
             call_arguments["judo_clip_classifier"]
             is classifier_model
+        )
+        assert (
+            call_arguments["absolute_frame_indices"]
+            == expected_absolute_frame_indices[clip_index]
+        )
+        assert (
+            call_arguments["pose_detection_frame_indices"]
+            == []
+        )
+        assert (
+            call_arguments["pose_detection_cache"]
+            is pose_detection_cache
         )
 
     select_intervals_mock.assert_called_once_with(
@@ -327,21 +334,6 @@ def test_run_pipeline_returns_empty_list_when_no_attempts_are_detected(
         ),
     ]
 
-    clip_frames = [
-        [
-            np.zeros(
-                (16, 16, 3),
-                dtype=np.uint8,
-            ),
-        ],
-        [
-            np.ones(
-                (16, 16, 3),
-                dtype=np.uint8,
-            ),
-        ],
-    ]
-
     clip_processing_results = [
         ClipProcessingResult(
             clip_id="0",
@@ -359,6 +351,7 @@ def test_run_pipeline_returns_empty_list_when_no_attempts_are_detected(
 
     yolo_model = mocker.Mock()
     classifier_model = mocker.Mock()
+    pose_detection_cache = {}
 
     mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
@@ -375,6 +368,14 @@ def test_run_pipeline_returns_empty_list_when_no_attempts_are_detected(
     )
     mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
+        "compute_initial_window_frame_indices",
+        side_effect=[
+            [0],
+            [90],
+        ],
+    )
+    mocker.patch(
+        f"{ORCHESTRATOR_MODULE_PATH}."
         "resolve_yolo_device",
         return_value="cpu",
     )
@@ -388,10 +389,10 @@ def test_run_pipeline_returns_empty_list_when_no_attempts_are_detected(
         "construct_classifier",
         return_value=classifier_model,
     )
-    extract_frames_mock = mocker.patch(
+    collect_pose_cache_mock = mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
-        "extract_frames_from_initial_window",
-        side_effect=clip_frames,
+        "collect_pose_detection_cache_from_video",
+        return_value=pose_detection_cache,
     )
     process_clip_mock = mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
@@ -430,8 +431,30 @@ def test_run_pipeline_returns_empty_list_when_no_attempts_are_detected(
         ),
     )
 
-    assert extract_frames_mock.call_count == 2
+    collect_pose_cache_mock.assert_called_once_with(
+        yolo_model=yolo_model,
+        source_video_path=cleansed_video_path,
+        required_frame_indices=[
+            0,
+            90,
+        ],
+        compute_device="cpu",
+    )
+
     assert process_clip_mock.call_count == 2
+
+    for process_call in process_clip_mock.call_args_list:
+        call_arguments = process_call.kwargs
+
+        assert call_arguments["clip_as_numpy"] == []
+        assert (
+            call_arguments["pose_detection_frame_indices"]
+            == []
+        )
+        assert (
+            call_arguments["pose_detection_cache"]
+            is pose_detection_cache
+        )
 
     # The pipeline uses contains_throw_attempt rather than the
     # predicted class-name string.
@@ -465,6 +488,10 @@ def test_run_pipeline_returns_empty_list_when_there_are_no_initial_windows(
         "compute_initial_clip_windows",
         return_value=iter(()),
     )
+    compute_frame_indices_mock = mocker.patch(
+        f"{ORCHESTRATOR_MODULE_PATH}."
+        "compute_initial_window_frame_indices",
+    )
     resolve_device_mock = mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
         "resolve_yolo_device",
@@ -480,9 +507,10 @@ def test_run_pipeline_returns_empty_list_when_there_are_no_initial_windows(
         "construct_classifier",
         return_value=mocker.Mock(),
     )
-    extract_frames_mock = mocker.patch(
+    collect_pose_cache_mock = mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
-        "extract_frames_from_initial_window",
+        "collect_pose_detection_cache_from_video",
+        return_value={},
     )
     process_clip_mock = mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
@@ -510,7 +538,15 @@ def test_run_pipeline_returns_empty_list_when_there_are_no_initial_windows(
     load_yolo_mock.assert_called_once()
     construct_classifier_mock.assert_called_once()
 
-    extract_frames_mock.assert_not_called()
+    compute_frame_indices_mock.assert_not_called()
+
+    collect_pose_cache_mock.assert_called_once_with(
+        yolo_model=load_yolo_mock.return_value,
+        source_video_path=cleansed_video_path,
+        required_frame_indices=[],
+        compute_device="cpu",
+    )
+
     process_clip_mock.assert_not_called()
     select_intervals_mock.assert_not_called()
     extract_final_clips_mock.assert_not_called()
@@ -532,6 +568,10 @@ def test_run_pipeline_propagates_cleansing_failure_and_stops_pipeline(
         f"{ORCHESTRATOR_MODULE_PATH}."
         "compute_initial_clip_windows",
     )
+    compute_frame_indices_mock = mocker.patch(
+        f"{ORCHESTRATOR_MODULE_PATH}."
+        "compute_initial_window_frame_indices",
+    )
     resolve_device_mock = mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
         "resolve_yolo_device",
@@ -543,6 +583,10 @@ def test_run_pipeline_propagates_cleansing_failure_and_stops_pipeline(
     construct_classifier_mock = mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
         "construct_classifier",
+    )
+    collect_pose_cache_mock = mocker.patch(
+        f"{ORCHESTRATOR_MODULE_PATH}."
+        "collect_pose_detection_cache_from_video",
     )
     process_clip_mock = mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
@@ -574,9 +618,11 @@ def test_run_pipeline_propagates_cleansing_failure_and_stops_pipeline(
     )
 
     compute_windows_mock.assert_not_called()
+    compute_frame_indices_mock.assert_not_called()
     resolve_device_mock.assert_not_called()
     load_yolo_mock.assert_not_called()
     construct_classifier_mock.assert_not_called()
+    collect_pose_cache_mock.assert_not_called()
     process_clip_mock.assert_not_called()
     select_intervals_mock.assert_not_called()
     extract_final_clips_mock.assert_not_called()
@@ -594,12 +640,6 @@ def test_run_pipeline_propagates_clip_processing_failure_and_does_not_extract_cl
         end_time=7.0,
         window_id=0,
     )
-    clip_frames = [
-        np.zeros(
-            (16, 16, 3),
-            dtype=np.uint8,
-        ),
-    ]
 
     processing_error = RuntimeError(
         "Clip processing failed"
@@ -607,6 +647,7 @@ def test_run_pipeline_propagates_clip_processing_failure_and_does_not_extract_cl
 
     yolo_model = mocker.Mock()
     classifier_model = mocker.Mock()
+    pose_detection_cache = {}
 
     mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
@@ -625,6 +666,11 @@ def test_run_pipeline_propagates_clip_processing_failure_and_does_not_extract_cl
     )
     mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
+        "compute_initial_window_frame_indices",
+        return_value=[0],
+    )
+    mocker.patch(
+        f"{ORCHESTRATOR_MODULE_PATH}."
         "resolve_yolo_device",
         return_value="cpu",
     )
@@ -638,10 +684,10 @@ def test_run_pipeline_propagates_clip_processing_failure_and_does_not_extract_cl
         "construct_classifier",
         return_value=classifier_model,
     )
-    mocker.patch(
+    collect_pose_cache_mock = mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
-        "extract_frames_from_initial_window",
-        return_value=clip_frames,
+        "collect_pose_detection_cache_from_video",
+        return_value=pose_detection_cache,
     )
     process_clip_mock = mocker.patch(
         f"{ORCHESTRATOR_MODULE_PATH}."
@@ -668,8 +714,15 @@ def test_run_pipeline_propagates_clip_processing_failure_and_does_not_extract_cl
 
     assert exception_info.value is processing_error
 
+    collect_pose_cache_mock.assert_called_once_with(
+        yolo_model=yolo_model,
+        source_video_path=cleansed_video_path,
+        required_frame_indices=[0],
+        compute_device="cpu",
+    )
+
     process_clip_mock.assert_called_once_with(
-        clip_as_numpy=clip_frames,
+        clip_as_numpy=[],
         clip_id="0",
         yolo_model=yolo_model,
         yolo_tracker_path=(
@@ -677,6 +730,9 @@ def test_run_pipeline_propagates_clip_processing_failure_and_does_not_extract_cl
         ),
         yolo_device="cpu",
         judo_clip_classifier=classifier_model,
+        absolute_frame_indices=[0],
+        pose_detection_frame_indices=[],
+        pose_detection_cache=pose_detection_cache,
     )
 
     select_intervals_mock.assert_not_called()

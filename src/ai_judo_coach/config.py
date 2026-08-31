@@ -5,6 +5,7 @@ from pathlib import Path
 
 # ----- Input video configs -----
 TARGET_FPS: float = 30.0   # input videos should be forced into this frame rate before being processed
+MAX_INPUT_VIDEO_DURATION_SEC: float = 30.0 * 60.0   # reject videos that are too long (saves me money)
 
 # ----- Initial video slice configs -----
 CLIP_DURATION_SEC: float = 7.0

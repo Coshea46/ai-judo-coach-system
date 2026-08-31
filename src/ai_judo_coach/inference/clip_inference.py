@@ -7,6 +7,10 @@ from v1_clip_classification_model.inference import (
     JudoClipClassifier,
 )
 
+from ai_judo_coach.inference.inference_schemas import (
+    ClipDetections,
+    FrameDetections,
+)
 from ai_judo_coach.schemas.internal import (
     ClipProcessingResult,
 )
@@ -19,6 +23,7 @@ from .player_detection import (
     detect_players,
 )
 from .yolo_feeder import (
+    collect_cached_tracked_clip_detections,
     collect_clip_detections,
     track_video,
 )
@@ -33,6 +38,9 @@ def process_clip(
     yolo_tracker_path: str,
     yolo_device: str,
     judo_clip_classifier: JudoClipClassifier,
+    absolute_frame_indices: list[int] | None = None,
+    pose_detection_frame_indices: list[int] | None = None,
+    pose_detection_cache: dict[int, FrameDetections] | None = None,
 ) -> ClipProcessingResult:
     """
     Takes a clip as a list of NumPy arrays all the way to its
@@ -40,21 +48,95 @@ def process_clip(
 
     The higher-level orchestrator handles looping over clips and
     constructs the model instances once so they can be reused.
+
+    When absolute frame indices, pose-detection frame indices and a
+    shared pose-detection cache are supplied, YOLO pose inference is
+    reused across overlapping clips. ByteTrack is still reset and
+    rerun independently for every clip.
     """
 
-    # Mini pipeline taking a single clip through YOLO, player detection,
-    # LSTM input construction, and LSTM classification.
-    yolo_results = track_video(
-        yolo_model=yolo_model,
-        tracker_path=yolo_tracker_path,
-        clip_as_numpy=clip_as_numpy,
-        compute_device=yolo_device,
+    cache_arguments = (
+        absolute_frame_indices,
+        pose_detection_frame_indices,
+        pose_detection_cache,
     )
 
-    clip_detections = collect_clip_detections(
-        clip_id=clip_id,
-        yolo_clip_output=yolo_results,
+    cache_arguments_are_incomplete = (
+        any(
+            argument is not None
+            for argument in cache_arguments
+        )
+        and not all(
+            argument is not None
+            for argument in cache_arguments
+        )
     )
+
+    if cache_arguments_are_incomplete:
+        raise ValueError(
+            "absolute_frame_indices, "
+            "pose_detection_frame_indices and "
+            "pose_detection_cache must either all be supplied "
+            "or all be omitted"
+        )
+
+    if (
+        absolute_frame_indices is not None
+        and pose_detection_frame_indices is not None
+        and pose_detection_cache is not None
+    ):
+        clip_detections = (
+            collect_cached_tracked_clip_detections(
+                yolo_model=yolo_model,
+                tracker_path=yolo_tracker_path,
+                clip_as_numpy=clip_as_numpy,
+                absolute_frame_indices=(
+                    absolute_frame_indices
+                ),
+                pose_detection_frame_indices=(
+                    pose_detection_frame_indices
+                ),
+                compute_device=yolo_device,
+                pose_detection_cache=(
+                    pose_detection_cache
+                ),
+                clip_id=clip_id,
+            )
+        )
+
+    else:
+        # Mini pipeline taking a single clip through YOLO and
+        # conversion into the project's detection schemas.
+        yolo_results = track_video(
+            yolo_model=yolo_model,
+            tracker_path=yolo_tracker_path,
+            clip_as_numpy=clip_as_numpy,
+            compute_device=yolo_device,
+        )
+
+        clip_detections = collect_clip_detections(
+            clip_id=clip_id,
+            yolo_clip_output=yolo_results,
+        )
+
+    return _process_clip_detections(
+        clip_detections=clip_detections,
+        clip_id=clip_id,
+        judo_clip_classifier=judo_clip_classifier,
+    )
+
+
+def _process_clip_detections(
+    clip_detections: ClipDetections,
+    clip_id: str,
+    judo_clip_classifier: JudoClipClassifier,
+) -> ClipProcessingResult:
+    """
+    Run player assignment and classification on clip detections.
+
+    Both the original YOLO tracking path and the cached pose-detection
+    path use this same downstream processing.
+    """
 
     player_pose_sequences, quality_report = detect_players(
         clip_detections=clip_detections,

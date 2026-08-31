@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+
 import numpy as np
 import decord
 from decord import VideoReader, cpu, gpu  # using decord since significantly faster and more accurate than OpenCV2
@@ -5,6 +7,43 @@ from decord._ffi.base import DECORDError
 
 from ai_judo_coach.exceptions import InvalidFrameIndicesError
 from ai_judo_coach.schemas.internal import InitialClipWindow
+
+
+def compute_initial_window_frame_indices(
+    window: InitialClipWindow,
+    video_fps: float,
+) -> list[int]:
+    """
+    Compute the absolute frame indices belonging to an initial window.
+
+    The calculation matches extract_frames_from_initial_window so callers
+    can identify cached and uncached frames before decoding video data.
+    """
+
+    start_frame = int(window.start_time * video_fps)
+    end_frame = int(window.end_time * video_fps) - 1
+
+    if start_frame < 0:
+        raise InvalidFrameIndicesError(
+            "Desired start frame index out of bounds"
+        )
+
+    if end_frame < 0:
+        raise InvalidFrameIndicesError(
+            "Desired end frame index out of bounds"
+        )
+
+    if end_frame < start_frame:
+        raise InvalidFrameIndicesError(
+            "Desired end frame index precedes start frame index"
+        )
+
+    return list(
+        range(
+            start_frame,
+            end_frame + 1,
+        )
+    )
 
 
 # fps should be passed in by caller and caller should be the one to get from config.py
@@ -27,8 +66,15 @@ def extract_frames_from_initial_window(
         desired_device=device,
     )
 
-    start_frame = int(window.start_time * video_fps)
-    end_frame = int(window.end_time * video_fps) - 1
+    desired_frame_indices = (
+        compute_initial_window_frame_indices(
+            window=window,
+            video_fps=video_fps,
+        )
+    )
+
+    start_frame = desired_frame_indices[0]
+    end_frame = desired_frame_indices[-1]
 
     frame_indices = list(
         range(
@@ -43,6 +89,109 @@ def extract_frames_from_initial_window(
         found_frame_indices=frame_indices,
     )
 
+    return _extract_bgr_frames(
+        video_reader=video_reader,
+        frame_indices=frame_indices,
+    )
+
+
+def extract_frames_by_indices(
+    source_video_path: str,
+    frame_indices: list[int],
+    device: str,
+) -> list[np.ndarray]:
+    """
+    Extract selected absolute video frames in the requested order.
+
+    An empty frame-index list returns immediately without opening the
+    source video. Returned frames are contiguous BGR NumPy arrays.
+    """
+
+    if not frame_indices:
+        return []
+
+    if min(frame_indices) < 0:
+        raise InvalidFrameIndicesError(
+            "Desired start frame index out of bounds"
+        )
+
+    video_reader = _read_video(
+        source_video_path=source_video_path,
+        desired_device=device,
+    )
+
+    if max(frame_indices) >= len(video_reader):
+        raise InvalidFrameIndicesError(
+            "Desired end frame index out of bounds"
+        )
+
+    return _extract_bgr_frames(
+        video_reader=video_reader,
+        frame_indices=frame_indices,
+    )
+
+
+
+def iter_bgr_frame_batches_by_indices(
+    source_video_path: str,
+    frame_indices: list[int],
+    device: str,
+    batch_size: int,
+) -> Iterator[tuple[list[int], list[np.ndarray]]]:
+    """
+    Decode exact absolute frame indices in bounded BGR batches.
+
+    Frame order is preserved. At most batch_size decoded frames are
+    retained by this iterator at one time.
+    """
+
+    if batch_size <= 0:
+        raise ValueError("batch_size must be greater than zero")
+
+    if not frame_indices:
+        return
+
+    if min(frame_indices) < 0:
+        raise InvalidFrameIndicesError(
+            "Desired start frame index out of bounds"
+        )
+
+    if frame_indices != sorted(set(frame_indices)):
+        raise InvalidFrameIndicesError(
+            "frame_indices must contain unique indices in ascending order"
+        )
+
+    video_reader = _read_video(
+        source_video_path=source_video_path,
+        desired_device=device,
+    )
+
+    if frame_indices[-1] >= len(video_reader):
+        raise InvalidFrameIndicesError(
+            "Desired end frame index out of bounds"
+        )
+
+    for batch_start in range(0, len(frame_indices), batch_size):
+        batch_indices = frame_indices[
+            batch_start:batch_start + batch_size
+        ]
+
+        yield (
+            batch_indices,
+            _extract_bgr_frames(
+                video_reader=video_reader,
+                frame_indices=batch_indices,
+            ),
+        )
+
+
+
+def _extract_bgr_frames(
+    video_reader: VideoReader,
+    frame_indices: list[int],
+) -> list[np.ndarray]:
+    """Extract selected Decord frames and convert RGB data to BGR."""
+
     # decord returns rgb but ultralytics yolo v11 xl expects bgr format for frames
     bgr_frames = (
         video_reader.get_batch(indices=frame_indices)
@@ -50,7 +199,12 @@ def extract_frames_from_initial_window(
         .copy()
     )
 
-    return [bgr_frames[i] for i in range(bgr_frames.shape[0])]
+    return [
+        bgr_frames[frame_index]
+        for frame_index in range(
+            bgr_frames.shape[0]
+        )
+    ]
 
 
 def _read_video(

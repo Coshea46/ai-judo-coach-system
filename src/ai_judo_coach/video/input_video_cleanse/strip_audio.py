@@ -8,6 +8,7 @@ from ai_judo_coach.exceptions import InvalidVideoError
 def strip_audio(
     input_video_path: str,
     output_video_path: str,
+    video_output_options: dict[str, object] | None = None,
 ) -> str:
     """
     Remove the audio track from the input video.
@@ -28,16 +29,22 @@ def strip_audio(
         exist_ok=True,
     )
 
+    output_options = dict(
+        video_output_options or {}
+    )
+    output_options["an"] = None
+
     try:
         (
             ffmpeg.input(str(input_path))
             .output(
                 str(output_path),
-                an=None,
+                **output_options,
             )
             .overwrite_output()
             .run(quiet=True)
         )
+
     except ffmpeg.Error as error:
         output_path.unlink(missing_ok=True)
 

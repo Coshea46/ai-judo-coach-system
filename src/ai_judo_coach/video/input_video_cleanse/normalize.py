@@ -9,6 +9,7 @@ def normalize_video_fps(
     input_video_path: str,
     target_fps: float,
     output_video_path: str,
+    video_output_options: dict[str, object] | None = None,
 ) -> str:
     """
     Re-encode the input video to a fixed FPS so downstream pipeline
@@ -35,6 +36,10 @@ def normalize_video_fps(
         exist_ok=True,
     )
 
+    output_options = dict(
+        video_output_options or {}
+    )
+
     try:
         (
             ffmpeg.input(str(input_path))
@@ -42,7 +47,10 @@ def normalize_video_fps(
                 "fps",
                 fps=target_fps,
             )
-            .output(str(output_path))
+            .output(
+                str(output_path),
+                **output_options,
+            )
             .overwrite_output()
             .run(quiet=True)
         )
