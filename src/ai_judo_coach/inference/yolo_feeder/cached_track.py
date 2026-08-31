@@ -16,6 +16,110 @@ from ai_judo_coach.inference.inference_schemas import (
 from .results_adapter import result_to_frame_detections
 
 
+def collect_pose_detection_cache_from_video(
+    yolo_model: YOLO,
+    source_video_path: str,
+    required_frame_indices: list[int],
+    compute_device: str | int,
+) -> dict[int, FrameDetections]:
+    """
+    Run pose inference sequentially over a video and cache required frames.
+
+    The input video is read directly by Ultralytics, avoiding repeated
+    Decord extraction and RGB-to-BGR copying for overlapping windows.
+    Results are converted immediately into lean CPU schemas.
+
+    Only required absolute frame indices are retained. Processing stops
+    after the final required frame has been received.
+    """
+
+    if not required_frame_indices:
+        return {}
+
+    if min(required_frame_indices) < 0:
+        raise ValueError(
+            "required_frame_indices must not contain negative values"
+        )
+
+    required_frame_index_set = set(
+        required_frame_indices
+    )
+    final_required_frame_idx = max(
+        required_frame_index_set
+    )
+
+    pose_detection_cache: dict[
+        int,
+        FrameDetections,
+    ] = {}
+
+    results_stream = yolo_model.predict(
+        source=Path(source_video_path),
+        stream=True,
+        conf=0.1,
+        batch=1,
+        vid_stride=1,
+        device=compute_device,
+        verbose=False,
+    )
+
+    try:
+        for absolute_frame_idx, result in enumerate(
+            results_stream
+        ):
+            if (
+                absolute_frame_idx
+                in required_frame_index_set
+            ):
+                frame_detections = (
+                    result_to_frame_detections(
+                        yolo_frame_result=result,
+                        frame_idx=absolute_frame_idx,
+                    )
+                )
+
+                # The shared cache must contain only untracked pose
+                # detections. ByteTrack is rerun independently for
+                # each classifier window.
+                for person_detection in (
+                    frame_detections.person_detections
+                ):
+                    person_detection.track_id = None
+
+                pose_detection_cache[
+                    absolute_frame_idx
+                ] = frame_detections
+
+            if (
+                absolute_frame_idx
+                >= final_required_frame_idx
+            ):
+                break
+
+    finally:
+        close_results_stream = getattr(
+            results_stream,
+            "close",
+            None,
+        )
+
+        if close_results_stream is not None:
+            close_results_stream()
+
+    missing_frame_indices = sorted(
+        required_frame_index_set
+        - pose_detection_cache.keys()
+    )
+
+    if missing_frame_indices:
+        raise RuntimeError(
+            "YOLO video prediction did not return required "
+            f"frame indices: {missing_frame_indices}"
+        )
+
+    return pose_detection_cache
+
+
 def collect_cached_tracked_clip_detections(
     yolo_model: YOLO,
     tracker_path: str,
@@ -70,7 +174,9 @@ def collect_cached_tracked_clip_detections(
         tracker_path=tracker_path,
     )
 
-    tracked_frame_detections: list[FrameDetections] = []
+    tracked_frame_detections: list[
+        FrameDetections
+    ] = []
 
     for relative_frame_idx, absolute_frame_idx in enumerate(
         absolute_frame_indices
@@ -317,7 +423,9 @@ def _build_tracked_frame_detections(
         untracked_frame_detections.frame_shape_hw
     )
 
-    tracked_person_detections: list[PersonDetection] = []
+    tracked_person_detections: list[
+        PersonDetection
+    ] = []
 
     for detection_idx, track in enumerate(tracks):
         if track.shape[0] < 8:

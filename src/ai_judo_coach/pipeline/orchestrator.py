@@ -1,13 +1,9 @@
-from collections.abc import Iterator
 from pathlib import Path
-
-import numpy as np
 
 from ai_judo_coach.config import(
     CLIP_STRIDE_SEC,
     CLIP_DURATION_SEC,
     TARGET_FPS,
-    DECORD_TARGET_DEVICE,
     YOLO_MODEL_WEIGHTS,
     YOLO_DEVICE,
     BYTETRACK_CONFIG_PATH,
@@ -20,8 +16,7 @@ from ai_judo_coach.config import(
 from ai_judo_coach.video import(
     compute_initial_clip_windows,
     compute_initial_window_frame_indices,
-    cleanse_input_video,
-    extract_frames_by_indices
+    cleanse_input_video
 )
 from ai_judo_coach.schemas.internal import(
     InitialClipWindow,
@@ -37,6 +32,9 @@ from ai_judo_coach.inference import(
 )
 from ai_judo_coach.inference.inference_schemas import (
     FrameDetections,
+)
+from ai_judo_coach.inference.yolo_feeder import (
+    collect_pose_detection_cache_from_video,
 )
 from ai_judo_coach.attempt_clip_generation import(
     select_new_intervals,
@@ -71,10 +69,32 @@ def run_pipeline(
     )
 
     # compute initial clip windows on cleansed input video
-    clip_windows_metadata_generator: Iterator[InitialClipWindow] = compute_initial_clip_windows(
-        input_video_path=cleansed_video_path,
-        individual_window_duration=float(CLIP_DURATION_SEC),
-        stride=float(CLIP_STRIDE_SEC)
+    clip_windows: list[InitialClipWindow] = list(
+        compute_initial_clip_windows(
+            input_video_path=cleansed_video_path,
+            individual_window_duration=float(CLIP_DURATION_SEC),
+            stride=float(CLIP_STRIDE_SEC)
+        )
+    )
+
+    clip_windows_with_frame_indices = [
+        (
+            clip_window,
+            compute_initial_window_frame_indices(
+                window=clip_window,
+                video_fps=float(TARGET_FPS),
+            ),
+        )
+        for clip_window in clip_windows
+    ]
+
+    required_frame_indices = sorted(
+        {
+            frame_idx
+            for _, absolute_frame_indices
+            in clip_windows_with_frame_indices
+            for frame_idx in absolute_frame_indices
+        }
     )
 
     # instantiate models for inference
@@ -91,51 +111,34 @@ def run_pipeline(
         classifier_device=CLASSIFIER_DEVICE
     )
 
+    # Run pose inference once over the cleansed video. ByteTrack is
+    # still constructed and rerun independently for every window.
+    pose_detection_cache: dict[int, FrameDetections] = (
+        collect_pose_detection_cache_from_video(
+            yolo_model=yolo_model,
+            source_video_path=cleansed_video_path,
+            required_frame_indices=required_frame_indices,
+            compute_device=yolo_device,
+        )
+    )
+
     # should store the surviving InitialClipWindow objects and their probabilities (those that have a throw in them)
     initial_throw_attempt_intervals: list[DetectedAttemptWindow] = []
 
-    # Cache untracked pose detections by absolute frame index so
-    # overlapping windows do not repeat YOLO pose inference.
-    pose_detection_cache: dict[int, FrameDetections] = {}
-
-    for clip_interval in clip_windows_metadata_generator:
-
-        absolute_frame_indices = (
-            compute_initial_window_frame_indices(
-                window=clip_interval,
-                video_fps=float(TARGET_FPS),
-            )
-        )
-
-        pose_detection_frame_indices = [
-            frame_idx
-            for frame_idx in absolute_frame_indices
-            if frame_idx not in pose_detection_cache
-        ]
-
-        # Only decode frames that have not already been processed by
-        # YOLO in an overlapping initial window.
-        clip_interval_as_numpy: list[np.ndarray] = (
-            extract_frames_by_indices(
-                source_video_path=cleansed_video_path,
-                frame_indices=(
-                    pose_detection_frame_indices
-                ),
-                device=DECORD_TARGET_DEVICE
-            )
-        )
+    for (
+        clip_interval,
+        absolute_frame_indices,
+    ) in clip_windows_with_frame_indices:
 
         clip_result: ClipProcessingResult = process_clip(
-            clip_as_numpy=clip_interval_as_numpy,
+            clip_as_numpy=[],
             clip_id=str(clip_interval.window_id),
             yolo_model=yolo_model,
             yolo_tracker_path=BYTETRACK_CONFIG_PATH,
             yolo_device=yolo_device,
             judo_clip_classifier=judo_classifier_model,
             absolute_frame_indices=absolute_frame_indices,
-            pose_detection_frame_indices=(
-                pose_detection_frame_indices
-            ),
+            pose_detection_frame_indices=[],
             pose_detection_cache=pose_detection_cache
         )
 

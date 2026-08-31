@@ -1,3 +1,6 @@
+from pathlib import Path
+from unittest.mock import call
+
 import numpy as np
 import pytest
 
@@ -777,3 +780,195 @@ def test_collect_cached_tracked_clip_detections_rejects_missing_cache_frames(
 
     yolo_model.predict.assert_not_called()
     create_tracker_mock.assert_not_called()
+
+
+
+
+
+def test_collect_pose_detection_cache_from_video_returns_empty_cache_without_prediction(
+    mocker,
+) -> None:
+    yolo_model = mocker.Mock()
+
+    result = (
+        cached_track
+        .collect_pose_detection_cache_from_video(
+            yolo_model=yolo_model,
+            source_video_path="/videos/cleansed.mp4",
+            required_frame_indices=[],
+            compute_device="cpu",
+        )
+    )
+
+    assert result == {}
+    yolo_model.predict.assert_not_called()
+
+
+def test_collect_pose_detection_cache_from_video_rejects_negative_indices(
+    mocker,
+) -> None:
+    yolo_model = mocker.Mock()
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "required_frame_indices must not contain "
+            "negative values"
+        ),
+    ):
+        cached_track.collect_pose_detection_cache_from_video(
+            yolo_model=yolo_model,
+            source_video_path="/videos/cleansed.mp4",
+            required_frame_indices=[
+                -1,
+                0,
+            ],
+            compute_device="cpu",
+        )
+
+    yolo_model.predict.assert_not_called()
+
+
+def test_collect_pose_detection_cache_from_video_collects_only_required_frames(
+    mocker,
+) -> None:
+    yolo_results = [
+        mocker.Mock(),
+        mocker.Mock(),
+        mocker.Mock(),
+        mocker.Mock(),
+    ]
+
+    yolo_model = mocker.Mock()
+    yolo_model.predict.return_value = iter(
+        yolo_results
+    )
+
+    adapted_frames = {
+        frame_idx: _create_frame_detections(
+            frame_idx=frame_idx,
+            person_detections=[
+                _create_person_detection(
+                    detection_idx=0,
+                    marker=float(frame_idx + 1),
+                    bbox_xyxy_px=[
+                        10.0,
+                        20.0,
+                        60.0,
+                        80.0,
+                    ],
+                    track_id=99,
+                ),
+            ],
+        )
+        for frame_idx in (
+            1,
+            3,
+        )
+    }
+
+    result_adapter_mock = mocker.patch.object(
+        cached_track,
+        "result_to_frame_detections",
+        side_effect=[
+            adapted_frames[1],
+            adapted_frames[3],
+        ],
+    )
+
+    result = (
+        cached_track
+        .collect_pose_detection_cache_from_video(
+            yolo_model=yolo_model,
+            source_video_path="/videos/cleansed.mp4",
+            required_frame_indices=[
+                3,
+                1,
+                3,
+            ],
+            compute_device="cuda:0",
+        )
+    )
+
+    yolo_model.predict.assert_called_once_with(
+        source=Path(
+            "/videos/cleansed.mp4"
+        ),
+        stream=True,
+        conf=0.1,
+        batch=1,
+        vid_stride=1,
+        device="cuda:0",
+        verbose=False,
+    )
+
+    assert result_adapter_mock.call_args_list == [
+        call(
+            yolo_frame_result=yolo_results[1],
+            frame_idx=1,
+        ),
+        call(
+            yolo_frame_result=yolo_results[3],
+            frame_idx=3,
+        ),
+    ]
+
+    assert set(result) == {
+        1,
+        3,
+    }
+
+    assert result[1].frame_idx == 1
+    assert result[3].frame_idx == 3
+
+    assert (
+        result[1].person_detections[0].track_id
+        is None
+    )
+    assert (
+        result[3].person_detections[0].track_id
+        is None
+    )
+
+
+def test_collect_pose_detection_cache_from_video_rejects_missing_frames(
+    mocker,
+) -> None:
+    yolo_result = mocker.Mock()
+    yolo_model = mocker.Mock()
+    yolo_model.predict.return_value = iter(
+        [
+            yolo_result,
+        ]
+    )
+
+    result_adapter_mock = mocker.patch.object(
+        cached_track,
+        "result_to_frame_detections",
+        return_value=_create_frame_detections(
+            frame_idx=0,
+            person_detections=[],
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "YOLO video prediction did not return "
+            "required frame indices: \\[1\\]"
+        ),
+    ):
+        cached_track.collect_pose_detection_cache_from_video(
+            yolo_model=yolo_model,
+            source_video_path="/videos/short.mp4",
+            required_frame_indices=[
+                0,
+                1,
+            ],
+            compute_device="cpu",
+        )
+
+    result_adapter_mock.assert_called_once_with(
+        yolo_frame_result=yolo_result,
+        frame_idx=0,
+    )
